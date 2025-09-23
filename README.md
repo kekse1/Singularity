@@ -6,7 +6,7 @@
 > *"Shall we give forensics a little work?"*  
 
 
-**Singularity** is a powerful Linux Kernel Module (LKM) rootkit for modern kernels (6x), built for red teaming and deep technical exploitation  and adversary emulation.
+**Singularity** is a Linux Kernel Module (LKM) rootkit for modern kernels (6x).
 
 ---
 
