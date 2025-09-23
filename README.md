@@ -22,8 +22,8 @@ cd Singularity
 make
 sudo insmod singularity.ko
 sudo bash scripts/journal.sh
+sudo bash scripts/x.sh
 cd ..
-sudo find Singularity -type f -exec shred -u {} \; && rm -rf Singularity
 ```
 
 > **Tested kernels: (**6.8** and **6.12** only), other kernel versions may not compile or crash, precisely because it was designed for modern 6x kernels. This is a risk you can take, so use it in a VM. You can also modify the code to work on any kernel version you like.**  
