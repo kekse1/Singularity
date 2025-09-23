@@ -1,6 +1,5 @@
 #!/bin/bash
 
-cd ../
 rm -rf .git
 rm -rf ftrace
 rm -rf include
