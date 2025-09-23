@@ -1,0 +1,30 @@
+#ifndef CORE_H
+#define CORE_H
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/init.h>
+#include <linux/syscalls.h>
+#include <linux/fs.h>
+#include <linux/uaccess.h>
+#include <linux/slab.h>
+#include <linux/list.h>
+#include <linux/dirent.h>
+#include <linux/string.h>
+#include <linux/ip.h>
+#include <linux/ipv6.h>
+#include <linux/tcp.h>
+#include <net/inet_sock.h>
+#include <linux/kthread.h>
+#include <linux/delay.h>
+#include <linux/sched/signal.h>
+#include <linux/kprobes.h>
+#include <linux/version.h>
+#include <linux/seq_file.h>
+#include <linux/netdevice.h>
+#include <linux/skbuff.h>
+#include <linux/sysinfo.h>
+#include <linux/path.h>
+#include <linux/namei.h>
+#include <linux/stat.h>
+#endif
