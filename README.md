@@ -26,7 +26,7 @@ sudo bash scripts/x.sh
 cd ..
 ```
 
-> **Tested kernels: (**6.8** and **6.12** only), other kernel versions may not compile or crash, precisely because it was designed for modern 6x kernels. This is a risk you can take, so use it in a VM. You can also modify the code to work on any kernel version you like.**  
+> **Tested kernels: (**6.8.0-79-generic** and **6.12** only), other kernel versions may not compile or crash, precisely because it was designed for modern 6x kernels. This is a risk you can take, so use it in a VM. You can also modify the code to work on any kernel version you like.**  
 
 ## All credits
 
