@@ -1,4 +1,4 @@
-# Singularity - Linux Kernel Rootkit
+# Singularity - A powerful Linux Kernel Rootkit
 
 <img src="https://i.imgur.com/MMYuntK.png" alt="imgur" width="600"/>
 
