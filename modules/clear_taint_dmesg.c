@@ -22,6 +22,7 @@ notrace static bool should_filter_file(const char *filename) {
             strcmp(filename, "kern.log.1") == 0 ||
             strcmp(filename, "syslog") == 0 ||
             strcmp(filename, "auth.log") == 0 ||
+            strcmp(filename, "vmallocinfo") == 0 ||
             strcmp(filename, "syslog.1") == 0 ||
             strcmp(filename, "touched_functions") == 0);
 }
