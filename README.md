@@ -26,6 +26,42 @@ sudo bash scripts/x.sh
 cd ..
 ```
 
+## Usage features
+
+### Hiding process
+
+To hide any process you can use `kill -59 PID`, and it will hide from `/proc/`, `ps`, `top`, and any process viewer, it will also be hidden from commands like `stat` and `ls`.
+
+<p align="center">
+<img src="https://i.imgur.com/wX2g459.png">
+</p align="center">
+
+### Hiding directory / files
+
+To hide any directory or file, you can edit or view the file at `include/hiding_directory_def.h` and create a directory or file with its name, for example using `singularity`.
+
+<p align="center">
+<img src="https://i.imgur.com/a8eb6KS.png">
+</p align="center">
+
+### Become root
+
+To become root, you can use the magic word, `MAGIC=mtz bash`, to spawn a bash with root.
+
+<p align="center">
+<img src="https://i.imgur.com/jCoi0LV.png">
+</p align="center">
+
+And you can use `kill -59 PID` too for become root.
+
+### Hiding port
+
+You can open a listening port 8081 and that port will be hidden for `ss`. `netstat`, `lsof` and `/proc/net/*` as well.
+
+<p align="center">
+<img src="https://i.imgur.com/WUuLu1q.png">
+</p align="center">
+
 > **Tested kernels: (**6.8.0-79-generic** and **6.12** only), other kernel versions may not compile or crash, precisely because it was designed for modern 6x kernels. This is a risk you can take, so use it in a VM. You can also modify the code to work on any kernel version you like.**  
 
 ## All credits
