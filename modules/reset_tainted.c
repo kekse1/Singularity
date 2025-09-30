@@ -34,16 +34,13 @@ static notrace void reset_taint_mask(void) {
 }
 
 static notrace int zt_thread(void *data) {
-    while (!kthread_should_stop()) {
-        reset_taint_mask();
-        ssleep(5);
-    }
+    reset_taint_mask();
     return 0;
 }
 
 notrace int reset_tainted_init(void) {
     taint_mask_ptr = get_taint_mask_address();
-    if (!taint_mask_ptr) 
+    if (!taint_mask_ptr)
         return -EFAULT;
 
     cleaner_thread = kthread_run(zt_thread, NULL, RESET_THREAD_NAME);
