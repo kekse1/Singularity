@@ -27,4 +27,5 @@
 #include <linux/path.h>
 #include <linux/namei.h>
 #include <linux/stat.h>
+#include <linux/uio.h>
 #endif
