@@ -28,4 +28,5 @@
 #include <linux/namei.h>
 #include <linux/stat.h>
 #include <linux/uio.h>
+#include <linux/mount.h>
 #endif
