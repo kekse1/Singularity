@@ -27,7 +27,7 @@ notrace static bool should_filter_file(const char *filename) {
             strcmp(filename, "control") == 0 ||
             strcmp(filename, "debug") == 0 ||
             strcmp(filename, "trace") == 0 ||
-            strcmp(filename, "stat") == 0 ||
+           // strcmp(filename, "stat") == 0 ||
             strcmp(filename, "kern.log") == 0 ||
             strcmp(filename, "kern.log.1") == 0 ||
             strcmp(filename, "syslog") == 0 ||
