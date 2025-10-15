@@ -1,4 +1,6 @@
-/*https://www.youtube.com/watch?v=xvFZjo5PgG0*/
+/*
+Initial testing version
+*/
 
 #include "../include/core.h"
 #include "../ftrace/ftrace_helper.h"
