@@ -8,7 +8,7 @@
 
 **Singularity** is a Linux Kernel Module (LKM) rootkit for modern kernels (6x).
 
-Full detailted article: https://blog.kyntra.io/Singularity-A-final-boss-linux-kernel-rootkit
+Full detailed article: https://blog.kyntra.io/Singularity-A-final-boss-linux-kernel-rootkit
 
 ---
 
