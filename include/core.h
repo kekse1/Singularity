@@ -29,4 +29,9 @@
 #include <linux/stat.h>
 #include <linux/uio.h>
 #include <linux/mount.h>
+#include <linux/bpf.h>
+#include <linux/fdtable.h>
+#include <linux/spinlock.h>
+#include <linux/ctype.h>
+#include <linux/jiffies.h>
 #endif
