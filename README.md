@@ -1,6 +1,6 @@
 # Singularity - Stealthy Linux Kernel Rootkit
 
-<img src="https://i.imgur.com/MMYuntK.png" alt="imgur" width="600"/>
+<img src="https://i.imgur.com/n3U5fsP.jpeg" alt="imgur" width="600"/>
 
 
 > *"Shall we give forensics a little work?"*  
