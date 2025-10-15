@@ -1,4 +1,4 @@
-# Singularity - Stealthy Linux Kernel Rootkit
+# Singularity - Powerful Linux Kernel Rootkit
 
 <img src="https://i.imgur.com/n3U5fsP.jpeg" alt="imgur" width="600"/>
 
@@ -7,6 +7,8 @@
 
 
 **Singularity** is a Linux Kernel Module (LKM) rootkit for modern kernels (6x).
+
+Full detailted article: https://blog.kyntra.io/Singularity-A-final-boss-linux-kernel-rootkit
 
 ---
 
