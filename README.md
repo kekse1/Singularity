@@ -28,6 +28,12 @@ sudo bash scripts/x.sh
 cd ..
 ```
 
+## References for this research
+
+KoviD: https://github.com/carloslack/KoviD
+
+Basilisk: https://github.com/lil-skelly/basilisk
+
 ## Usage features
 
 ### Hiding process
@@ -198,13 +204,6 @@ But if you're a good forensic, DFIR, or malware analyst, I'll let you figure it 
 
 I won't patch for this, because it will be much more OP ;)
 
----
-
-## References for this research
-
-KoviD: https://github.com/carloslack/KoviD
-
-Basilisk: https://github.com/lil-skelly/basilisk
 
 ---
 ## Contribution and Bugs
