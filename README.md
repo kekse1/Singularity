@@ -28,12 +28,6 @@ sudo bash scripts/x.sh
 cd ..
 ```
 
-## References for this research
-
-KoviD: https://github.com/carloslack/KoviD
-
-Basilisk: https://github.com/lil-skelly/basilisk
-
 ## Usage features
 
 ### Hiding process
@@ -86,6 +80,13 @@ There are codes that I originally reused from my "Collection of codes focused on
 **credits to the repo contributors as well.**
 
 - https://github.com/MatheuZSecurity/Rootkit
+
+References for this research
+
+KoviD: https://github.com/carloslack/KoviD
+
+Basilisk: https://github.com/lil-skelly/basilisk
+
 
 ---
 
