@@ -59,7 +59,7 @@ notrace static bool line_contains_sensitive_info(const char *line) {
             strstr(line, "Singularity") != NULL ||
             strstr(line, "matheuz") != NULL ||
             strstr(line, "zer0t") != NULL ||
-            strstr(line, "jira") != NULL ||
+            strstr(line, "kallsyms_lookup_name") != NULL ||
             strstr(line, "obliviate") != NULL);
 }
 
