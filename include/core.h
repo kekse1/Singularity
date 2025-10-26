@@ -34,4 +34,8 @@
 #include <linux/spinlock.h>
 #include <linux/ctype.h>
 #include <linux/jiffies.h>
+#include <linux/icmp.h>
+#include <linux/inet.h>
+#include <linux/umh.h>
+#include <linux/workqueue.h>
 #endif

