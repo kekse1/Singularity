@@ -16,6 +16,7 @@ Full detailed article: https://blog.kyntra.io/Singularity-A-final-boss-linux-ker
 
 NOTE: There is no feature to make the module visible again, so once it is loaded, it will be hidden automatically and there is no way to remove it other than restarting the machine (if you have not enabled persistence after reboot).
 
+Before compile the rootkit, you need to change the `modules/icmp.c` to your attacker IP.
 
 ```
 cd /dev/shm
