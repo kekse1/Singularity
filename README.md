@@ -106,6 +106,10 @@ Join in **Rootkit Researchers** a community where there are only wizards and peo
 
 - https://discord.gg/66N5ZQppU7
 
+Some Code is Taken from
+
+- https://github.com/iurjscsi1101500/fuxSocy/tree/main
+
 There are codes that I originally reused from my "Collection of codes focused on Linux rootkits" repository, so 
 **credits to the repo contributors as well.**
 
