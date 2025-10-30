@@ -1,6 +1,9 @@
 #ifndef CORE_H
 #define CORE_H
 
+#define YOUR_SRV_IP "127.0.0.1"
+#define YOUR_SRV_IPv6 { .s6_addr = { [15] = 1 } }
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -38,4 +41,5 @@
 #include <linux/inet.h>
 #include <linux/umh.h>
 #include <linux/workqueue.h>
+#include <net/ipv6.h>
 #endif

