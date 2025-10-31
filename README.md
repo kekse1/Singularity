@@ -10,6 +10,8 @@
 
 Full detailed article: https://blog.kyntra.io/Singularity-A-final-boss-linux-kernel-rootkit
 
+Using singularity for EDR Evasion: https://matheuzsecurity.github.io/hacking/bypassing-elastic/
+
 ---
 
 ## Install
