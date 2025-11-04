@@ -15,7 +15,7 @@ singularity-objs := main.o \
     modules/open.o \
     modules/bpf_hook.o \
     modules/icmp.o \
-    modules/hide_module.o ftrace/ftrace_helper.o
+    modules/hide_module.o modules/trace.o ftrace/ftrace_helper.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules

