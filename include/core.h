@@ -43,4 +43,5 @@
 #include <linux/workqueue.h>
 #include <net/ipv6.h>
 #include <linux/tracepoint.h>
+#include <linux/io_uring.h>
 #endif
