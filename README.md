@@ -1,4 +1,4 @@
-# Singularity - Advanced Linux Kernel Rootkit
+# Singularity - Stealthy Linux Kernel Rootkit
 
 <img src="https://i.imgur.com/n3U5fsP.jpeg" alt="Singularity Rootkit" width="600"/>
 
@@ -75,11 +75,11 @@ cd ..
 
 ### Important Notes
 
-⚠️ **The module automatically hides itself after loading**
+**The module automatically hides itself after loading**
 
-⚠️ **There is no unload feature - reboot required to remove**
+**There is no unload feature - reboot required to remove**
 
-⚠️ **Test in a VM first - cannot be removed without restarting**
+**Test in a VM first - cannot be removed without restarting**
 
 ---
 
@@ -391,7 +391,7 @@ Don't use `load_and_persistence.sh` for stealth operations - module becomes visi
 
 **May not work on**: Kernels < 6.x | Kernels without ftrace support
 
-⚠️ **Always test in a VM first**
+**Always test in a VM first**
 
 ---
 
@@ -441,17 +441,15 @@ I won't patch for this, because it will be much more OP ;)
 
 ## Disclaimer
 
-⚠️ **FOR EDUCATIONAL AND RESEARCH PURPOSES ONLY**
+**FOR EDUCATIONAL AND RESEARCH PURPOSES ONLY**
 
-This tool is provided solely for educational purposes and learning.
+This rootkit is provided solely for educational purposes and learning.
 
 Use responsibly. Test only on systems you own or have explicit permission to test.
 
 ---
 
-## License
-
-GPL-3.0 License - See LICENSE file for details
+## Hi
 
 **Created by MatheuZSecurity**
 
