@@ -19,7 +19,7 @@ extern struct kprobe kp;
 
 #define HOOK(_name, _hook, _orig) { .name = (_name), .function = (_hook), .original = (_orig), }
 
-#define USE_FENTRY_OFFSET 0
+#define USE_FENTRY_OFFSET 1
 #if !USE_FENTRY_OFFSET
 #pragma GCC optimize("-fno-optimize-sibling-calls")
 #endif
@@ -39,5 +39,7 @@ int  fh_install_hook(struct ftrace_hook *hook);
 void fh_remove_hook(struct ftrace_hook *hook);
 int  fh_install_hooks(struct ftrace_hook *hooks, size_t count);
 void fh_remove_hooks(struct ftrace_hook *hooks, size_t count);
+
+unsigned long *resolve_sym(const char *symname);
 
 #endif

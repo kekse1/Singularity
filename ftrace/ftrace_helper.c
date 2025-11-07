@@ -5,16 +5,28 @@
 struct kprobe kp = { .symbol_name = "kallsyms_lookup_name" };
 #endif
 
+#ifdef KPROBE_LOOKUP
+typedef unsigned long (*kallsyms_lookup_name_t)(const char *name);
+kallsyms_lookup_name_t kallsyms_lookup_name_fn = NULL;
+#endif
+
+notrace unsigned long *resolve_sym(const char *symname)
+{
+    if (kallsyms_lookup_name_fn == NULL) {
+#ifdef KPROBE_LOOKUP
+        register_kprobe(&kp);
+        kallsyms_lookup_name_fn = (kallsyms_lookup_name_t) kp.addr;
+        unregister_kprobe(&kp);
+#else
+        kallsyms_lookup_name_fn = &kallsyms_lookup_name;
+#endif
+    }
+    return (unsigned long *)kallsyms_lookup_name_fn(symname);
+}
+
 notrace int fh_resolve_hook_address(struct ftrace_hook *hook)
 {
-#ifdef KPROBE_LOOKUP
-    typedef unsigned long (*kallsyms_lookup_name_t)(const char *name);
-    kallsyms_lookup_name_t kallsyms_lookup_name;
-    register_kprobe(&kp);
-    kallsyms_lookup_name = (kallsyms_lookup_name_t) kp.addr;
-    unregister_kprobe(&kp);
-#endif
-    hook->address = kallsyms_lookup_name(hook->name);
+    hook->address = (unsigned long)resolve_sym(hook->name);
 
     if (!hook->address) {
         pr_debug("ftrace_helper: unresolved symbol: %s\n", hook->name);
