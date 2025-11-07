@@ -40,4 +40,6 @@ void fh_remove_hook(struct ftrace_hook *hook);
 int  fh_install_hooks(struct ftrace_hook *hooks, size_t count);
 void fh_remove_hooks(struct ftrace_hook *hooks, size_t count);
 
+unsigned long *resolve_sym(const char *symname);
+
 #endif
