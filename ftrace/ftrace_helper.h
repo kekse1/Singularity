@@ -12,7 +12,7 @@
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,7,0)
-#define KPROBE_LOOKUP 0 //Changed to 0 (previously 1) for the simple reason that it caused crashes in kernels 6.12 and others
+#define KPROBE_LOOKUP 0
 #include <linux/kprobes.h>
 extern struct kprobe kp;
 #endif
