@@ -12,14 +12,14 @@
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,7,0)
-#define KPROBE_LOOKUP 0
+#define KPROBE_LOOKUP 1
 #include <linux/kprobes.h>
 extern struct kprobe kp;
 #endif
 
 #define HOOK(_name, _hook, _orig) { .name = (_name), .function = (_hook), .original = (_orig), }
 
-#define USE_FENTRY_OFFSET 1
+#define USE_FENTRY_OFFSET 0 //Changed to 0 (previously 1) for the simple reason that it caused crashes in kernels 6.12 and others
 #if !USE_FENTRY_OFFSET
 #pragma GCC optimize("-fno-optimize-sibling-calls")
 #endif
