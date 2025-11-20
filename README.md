@@ -380,6 +380,7 @@ Don't use `load_and_persistence.sh` for stealth operations - module becomes visi
 | module_hide_current | hide_module.c | Remove from lists/sysfs |
 | sched_process_fork (tracepoint) | trace.c | Track child processes |
 | tainted_mask (kthread) | reset_tainted.c | Clear kernel taint flags |
+| netlink_unicast | hooking_audit.c | Drop audit messages for hidden PIDs |
 
 **Multi-Architecture Support**: x86_64 (`__x64_sys_*`) and ia32 (`__ia32_sys_*`, `__ia32_compat_sys_*`)
 
