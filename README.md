@@ -24,6 +24,7 @@ Singularity is a sophisticated rootkit that operates at the kernel level, provid
 - **Self-Hiding**: Remove itself from module lists and system monitoring
 - **Remote Access**: ICMP-triggered reverse shell with automatic hiding
 - **Anti-Detection**: Block eBPF tools, io_uring operations, and prevent module loading
+- **Audit Evasion**: Drop audit messages for hidden processes at netlink level
 
 ---
 
@@ -45,6 +46,7 @@ Singularity is a sophisticated rootkit that operates at the kernel level, provid
 - Multi-architecture support (x64 + ia32)
 - Network packet-level filtering with raw socket protection
 - Protection against all file I/O variants (read, write, splice, sendfile, tee, copy_file_range)
+- Netlink-level audit message filtering to evade auditd detection
 
 ---
 
