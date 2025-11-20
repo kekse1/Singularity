@@ -44,4 +44,9 @@
 #include <net/ipv6.h>
 #include <linux/tracepoint.h>
 #include <linux/io_uring.h>
+#include <linux/netlink.h>
+#include <net/netlink.h>
+#include <net/sock.h>
+#include <linux/audit.h>
+#include <net/net_namespace.h>
 #endif
