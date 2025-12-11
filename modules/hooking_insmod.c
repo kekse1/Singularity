@@ -8,10 +8,16 @@ static asmlinkage long (*hooked_init_module32)(struct file *file, const char *ua
 static asmlinkage long (*hooked_finit_module32)(struct file *file, const char *uargs, unsigned long flags);
 
 static notrace asmlinkage long hook_init_module(struct file *file, const char *uargs, unsigned long flags) {
+    if (!capable(CAP_SYS_MODULE))
+        return -EPERM;
+    
     return -ENOEXEC;
 }
 
 static notrace asmlinkage long hook_finit_module(struct file *file, const char *uargs, unsigned long flags) {
+    if (!capable(CAP_SYS_MODULE))
+        return -EPERM;
+    
     return -ENOEXEC;
 }
 
@@ -19,8 +25,11 @@ static notrace asmlinkage long hook_init_module32(struct pt_regs *regs) {
     struct file *file = (struct file *)regs->bx;
     const char *uargs = (const char *)regs->cx;
     unsigned long flags = regs->dx;
-
     (void)file; (void)uargs; (void)flags;
+    
+    if (!capable(CAP_SYS_MODULE))
+        return -EPERM;
+    
     return -ENOEXEC;
 }
 
@@ -28,8 +37,11 @@ static notrace asmlinkage long hook_finit_module32(struct pt_regs *regs) {
     struct file *file = (struct file *)regs->bx;
     const char *uargs = (const char *)regs->cx;
     unsigned long flags = regs->dx;
-
     (void)file; (void)uargs; (void)flags;
+    
+    if (!capable(CAP_SYS_MODULE))
+        return -EPERM;
+    
     return -ENOEXEC;
 }
 
