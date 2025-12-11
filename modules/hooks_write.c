@@ -162,8 +162,7 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
             memcpy(temp_buf, kernel_buf, parse_len);
             temp_buf[parse_len] = '\0';
             
-            if ((temp_buf[0] >= '0' && temp_buf[0] <= '9') || 
-                temp_buf[0] == '-' || temp_buf[0] == '+') {
+            if ((temp_buf[0] >= '0' && temp_buf[0] <= '9') || temp_buf[0] == '-') {
                 
                 simple_strtol(temp_buf, &endptr, 0);
                 
