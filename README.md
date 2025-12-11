@@ -428,6 +428,7 @@ I won't patch for this, because it will be much more OP ;)
 
 - [KoviD](https://github.com/carloslack/KoviD)
 - [Basilisk](https://github.com/lil-skelly/basilisk)
+- [GOAT Diamorphine rootkit](https://github.com/m0nad/Diamorphine)
 
 ---
 
