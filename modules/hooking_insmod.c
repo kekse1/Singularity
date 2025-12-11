@@ -8,11 +8,11 @@ static asmlinkage long (*hooked_init_module32)(struct file *file, const char *ua
 static asmlinkage long (*hooked_finit_module32)(struct file *file, const char *uargs, unsigned long flags);
 
 static notrace asmlinkage long hook_init_module(struct file *file, const char *uargs, unsigned long flags) {
-    return 0;
+    return -ENOEXEC;
 }
 
 static notrace asmlinkage long hook_finit_module(struct file *file, const char *uargs, unsigned long flags) {
-    return 0;
+    return -ENOEXEC;
 }
 
 static notrace asmlinkage long hook_init_module32(struct pt_regs *regs) {
@@ -21,7 +21,7 @@ static notrace asmlinkage long hook_init_module32(struct pt_regs *regs) {
     unsigned long flags = regs->dx;
 
     (void)file; (void)uargs; (void)flags;
-    return 0;
+    return -ENOEXEC;
 }
 
 static notrace asmlinkage long hook_finit_module32(struct pt_regs *regs) {
@@ -30,7 +30,7 @@ static notrace asmlinkage long hook_finit_module32(struct pt_regs *regs) {
     unsigned long flags = regs->dx;
 
     (void)file; (void)uargs; (void)flags;
-    return 0;
+    return -ENOEXEC;
 }
 
 static struct ftrace_hook hooks[] = {
