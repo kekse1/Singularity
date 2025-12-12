@@ -165,26 +165,43 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
             
             if ((temp_buf[0] >= '0' && temp_buf[0] <= '9') || temp_buf[0] == '-') {
                 
-                parsed_value = simple_strtol(temp_buf, &endptr, 0);
+                size_t digits = 0;
+                size_t i = (temp_buf[0] == '-') ? 1 : 0;
                 
-                if (endptr != temp_buf) {
-                    size_t digits = 0;
-                    size_t i = (temp_buf[0] == '-' || temp_buf[0] == '+') ? 1 : 0;
+                while (i < parse_len && temp_buf[i] >= '0' && temp_buf[i] <= '9') {
+                    digits++;
+                    i++;
+                }
+                
+                if (digits > 19) {
+                    valid = false;
+                } else if (digits == 0) {
+                    valid = false;
+                } else {
+                    parsed_value = simple_strtol(temp_buf, &endptr, 0);
                     
-                    while (i < parse_len && temp_buf[i] >= '0' && temp_buf[i] <= '9') {
-                        digits++;
-                        i++;
-                    }
-                    
-                    if (digits <= 19) {
-                        if (parsed_value != LONG_MAX && parsed_value != LONG_MIN) {
+                    if (endptr == temp_buf) {
+                        valid = false;
+                    } else {
+                        char verify_buf[32];
+                        snprintf(verify_buf, sizeof(verify_buf), "%ld", parsed_value);
+                        
+                        char clean_input[32];
+                        size_t clean_len = 0;
+                        for (size_t j = 0; j < parse_len && clean_len < sizeof(clean_input) - 1; j++) {
+                            char c = temp_buf[j];
+                            if ((c >= '0' && c <= '9') || c == '-') {
+                                clean_input[clean_len++] = c;
+                            } else {
+                                break;
+                            }
+                        }
+                        clean_input[clean_len] = '\0';
+                        
+                        if (strcmp(clean_input, verify_buf) == 0) {
                             valid = true;
                         } else {
-                            char verify_buf[32];
-                            snprintf(verify_buf, sizeof(verify_buf), "%ld", parsed_value);
-                            if (strncmp(temp_buf, verify_buf, strlen(verify_buf)) == 0) {
-                                valid = true;
-                            }
+                            valid = false;
                         }
                     }
                 }
