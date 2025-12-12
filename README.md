@@ -304,7 +304,7 @@ Child processes automatically tracked via sched_process_fork tracepoint hook.
 
 **Module Detection**: lsmod, modinfo, /sys/module, /proc/modules, kmod
 
-**Modern Detection**: eBPF-based security tools (Tracee), io_uring-based monitors
+**Modern Detection**: eBPF-based security tools (Tracee), io_uring-based monitors, and some Linux EDRs
 
 ---
 
