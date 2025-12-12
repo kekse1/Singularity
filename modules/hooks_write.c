@@ -165,45 +165,68 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
             
             if ((temp_buf[0] >= '0' && temp_buf[0] <= '9') || temp_buf[0] == '-') {
                 
-                size_t digits = 0;
-                size_t i = (temp_buf[0] == '-') ? 1 : 0;
+                parsed_value = simple_strtol(temp_buf, &endptr, 0);
                 
-                while (i < parse_len && temp_buf[i] >= '0' && temp_buf[i] <= '9') {
-                    digits++;
-                    i++;
-                }
-                
-                if (digits > 19) {
+                if (endptr == temp_buf) {
                     valid = false;
-                } else if (digits == 0) {
-                    valid = false;
-                } else {
-                    parsed_value = simple_strtol(temp_buf, &endptr, 0);
+                } 
+                else if (*endptr == '\0' || *endptr == '\n' || 
+                         *endptr == ' ' || *endptr == '\r' || *endptr == '\t') {
                     
-                    if (endptr == temp_buf) {
-                        valid = false;
-                    } else {
-                        char verify_buf[32];
-                        snprintf(verify_buf, sizeof(verify_buf), "%ld", parsed_value);
-                        
-                        char clean_input[32];
-                        size_t clean_len = 0;
-                        for (size_t j = 0; j < parse_len && clean_len < sizeof(clean_input) - 1; j++) {
-                            char c = temp_buf[j];
-                            if ((c >= '0' && c <= '9') || c == '-') {
-                                clean_input[clean_len++] = c;
-                            } else {
-                                break;
-                            }
-                        }
-                        clean_input[clean_len] = '\0';
-                        
-                        if (strcmp(clean_input, verify_buf) == 0) {
+                    char verify_decimal[32];
+                    snprintf(verify_decimal, sizeof(verify_decimal), "%ld", parsed_value);
+                    
+                    size_t input_start = 0;
+                    while (input_start < parse_len && 
+                           (temp_buf[input_start] == ' ' || temp_buf[input_start] == '\t')) {
+                        input_start++;
+                    }
+                    
+                    size_t input_end = input_start;
+                    while (input_end < parse_len && 
+                           temp_buf[input_end] != '\n' && 
+                           temp_buf[input_end] != '\0' &&
+                           temp_buf[input_end] != ' ' &&
+                           temp_buf[input_end] != '\r' &&
+                           temp_buf[input_end] != '\t') {
+                        input_end++;
+                    }
+                    
+                    char clean_input[32];
+                    size_t clean_len = input_end - input_start;
+                    if (clean_len >= sizeof(clean_input)) {
+                        clean_len = sizeof(clean_input) - 1;
+                    }
+                    memcpy(clean_input, temp_buf + input_start, clean_len);
+                    clean_input[clean_len] = '\0';
+                    
+                    bool is_hex = (clean_len > 2 && clean_input[0] == '0' && 
+                                  (clean_input[1] == 'x' || clean_input[1] == 'X'));
+                    bool is_octal = (clean_len > 1 && clean_input[0] == '0' && 
+                                    clean_input[1] >= '0' && clean_input[1] <= '7');
+                    bool is_decimal = !is_hex && !is_octal;
+                    
+                    if (is_decimal) {
+                        if (strcmp(clean_input, verify_decimal) == 0) {
                             valid = true;
                         } else {
                             valid = false;
                         }
                     }
+                        
+                    else {
+                        char *test_endptr;
+                        long test_value = simple_strtol(clean_input, &test_endptr, 0);
+                        
+                        if (test_value == parsed_value) {
+                            valid = true;
+                        } else {
+                            valid = false;
+                        }
+                    }
+                } 
+                else {
+                    valid = false;
                 }
             }
         }
