@@ -179,6 +179,7 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
             c == '-' ||                
             c == ' ' || c == '\t' ||
             c == '\n' || c == '\r' || 
+            c == '\f' || c == '\v' ||
             c == '\0') {             
             continue;
         }
@@ -190,7 +191,9 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
     start = 0;
     while (start < len && (kernel_buf[start] == '\0' || 
                            kernel_buf[start] == ' ' || 
-                           kernel_buf[start] == '\t'))
+                           kernel_buf[start] == '\t' ||
+                           kernel_buf[start] == '\f' ||
+                           kernel_buf[start] == '\v'))
         start++;
 
     if (start >= len) {
