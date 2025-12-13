@@ -125,7 +125,7 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
     size_t count;
     struct file *file;
     char *kernel_buf;
-    char temp_buf[64];
+    char temp_buf[256];
     size_t copy_len;
     size_t i, start, end;
     long parsed_value;
@@ -167,11 +167,32 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
         return -EFAULT;
     }
 
-    copy_len = min(count, sizeof(temp_buf) - 1);
+    copy_len = min(count, (size_t)BUF_SIZE - 1);
+    if (copy_len > sizeof(temp_buf) - 1) {
+        copy_len = sizeof(temp_buf) - 1;
+    }
+    
     memcpy(temp_buf, kernel_buf, copy_len);
     temp_buf[copy_len] = '\0';
 
     kfree(kernel_buf);
+
+    for (i = 0; i < copy_len; i++) {
+        char c = temp_buf[i];
+        
+        if ((c >= '0' && c <= '9') ||
+            (c >= 'a' && c <= 'f') ||
+            (c >= 'A' && c <= 'F') ||
+            c == 'x' || c == 'X' ||
+            c == '-' ||                
+            c == ' ' || c == '\t' ||
+            c == '\n' || c == '\r' || 
+            c == '\0') {             
+            continue;
+        }
+        
+        return -EINVAL;
+    }
 
     start = 0;
     while (start < copy_len && temp_buf[start] == '\0')
