@@ -130,7 +130,6 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
     size_t i, start, end;
     long parsed_value;
     int ret;
-    bool only_nulls;
 
     if (!orig || !regs)
         return -EINVAL;
@@ -174,17 +173,13 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
 
     kfree(kernel_buf);
 
-    only_nulls = true;
-    for (i = 0; i < copy_len; i++) {
-        if (temp_buf[i] != '\0') {
-            only_nulls = false;
-            break;
-        }
-    }
-    if (only_nulls)
+    start = 0;
+    while (start < copy_len && temp_buf[start] == '\0')
+        start++;
+
+    if (start >= copy_len)
         return count;
 
-    start = 0;
     while (start < copy_len && (temp_buf[start] == ' ' || temp_buf[start] == '\t'))
         start++;
 
