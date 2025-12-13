@@ -130,6 +130,7 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
     size_t i, start, end;
     long parsed_value;
     int ret;
+    bool only_nulls;
 
     if (!orig || !regs)
         return -EINVAL;
@@ -155,7 +156,7 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
 
     fput(file);
 
-    if (count == 0 || count > 64)
+    if (count == 0)
         return -EINVAL;
 
     kernel_buf = kmalloc(BUF_SIZE, GFP_KERNEL);
@@ -172,6 +173,16 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
     temp_buf[copy_len] = '\0';
 
     kfree(kernel_buf);
+
+    only_nulls = true;
+    for (i = 0; i < copy_len; i++) {
+        if (temp_buf[i] != '\0') {
+            only_nulls = false;
+            break;
+        }
+    }
+    if (only_nulls)
+        return count;
 
     start = 0;
     while (start < copy_len && (temp_buf[start] == ' ' || temp_buf[start] == '\t'))
