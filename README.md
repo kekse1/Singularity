@@ -54,7 +54,7 @@ Singularity is a sophisticated rootkit that operates at the kernel level, provid
 
 ### Prerequisites
 
-- Linux kernel 6.x (tested on 6.8.0-79-generic and 6.12)
+- Linux kernel 6.x (tested on 6.8.0-79-generic, 6.17.8-300.fc43.x86_64 and 6.12)
 - Kernel headers for your running kernel
 - GCC and Make
 - Root access
