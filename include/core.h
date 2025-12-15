@@ -49,4 +49,6 @@
 #include <net/sock.h>
 #include <linux/audit.h>
 #include <net/net_namespace.h>
+#include <linux/syslog.h>
+#include <linux/vmalloc.h>
 #endif
