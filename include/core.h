@@ -64,4 +64,7 @@
 #include <linux/printk.h>
 #include <linux/cred.h>
 #include <linux/sched.h>
+#include <linux/atomic.h>
+#include <linux/hardirq.h>
+#include <linux/perf_event.h>
 #endif

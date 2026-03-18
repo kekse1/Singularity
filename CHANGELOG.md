@@ -1,5 +1,54 @@
 # Changelog
 
+## [Released] - 2026-03-18
+
+### Added
+
+**Self-Defense Module** (`modules/selfdefense.c` / `include/selfdefense.h`)
+- Added a dedicated self-protection subsystem with exported bootstrap/init/exit routines: `sd_bootstrap_kprobe_hook()`, `sd_protect_symbol()`, `selfdefense_init()`, and `selfdefense_exit()`
+- Added symbol prologue snapshotting (`PROLOGUE_SNAP`, `MAX_SNAPS`) to cache original bytes from high-value kernel symbols before other hooks are installed
+- Added `register_kprobe` interception via direct ftrace bootstrap to prevent external kprobe registration from trivially targeting protected code paths
+- Added `copy_from_kernel_nofault` filtering so reads against protected addresses return snapshotted bytes or a sanitized NOP-filled buffer instead of live hooked code
+- Added `kallsyms_on_each_symbol`, `__module_address`, and `find_module` filtering to suppress direct symbol and module discovery for the loaded module
+- Added LiME / memory-forensics resistance hooks for `walk_system_ram_res`, `walk_iomem_res_desc`, `kmap_atomic`, and `kmap_local_page`
+- Added I/O memory poisoning for the module's RAM range by relabeling the containing `iomem_resource` entry from `System RAM` to `Reserved`
+- Added a zeroed fallback page path so physical pages belonging to the module can be mapped as benign data
+
+### Changed
+
+**Module Bootstrap & Teardown** (`main.c`)
+- Integrated `selfdefense.h` into the main module entry point
+- Added `sd_snapshot_all()` to pre-register a wide set of syscall, networking, audit, BPF, ICMP, taskstats, and compat syscall symbols for protection before hook installation
+- Initialization order now bootstraps the kprobe interception first, snapshots protected symbols second, and enables `selfdefense_init()` before the rest of the functional modules
+- Exit order was rearranged to unwind runtime hooks first and call `selfdefense_exit()` last, keeping the self-protection layer active during teardown
+
+**Build System** (`Makefile`)
+- Added `modules/selfdefense.o` to the module object list so the new self-defense subsystem is built and linked into `singularity`
+
+**Core Header Surface** (`include/core.h`)
+- Added kernel headers required by the new protection paths: `<linux/atomic.h>`, `<linux/hardirq.h>`, and `<linux/perf_event.h>`
+
+**Privilege Escalation / PID Hiding Integration** (`modules/become_root.c`)
+- Replaced direct scans over `hidden_pids[]` with the shared `is_hidden_pid()` helper
+- Switched `sysinfo` process count adjustments to `hidden_pid_count()` instead of reading `hidden_count` directly
+- Reworked `SpawnRoot()` to lock the current task and swap `real_cred` / `cred` pointers explicitly with `rcu_assign_pointer()` and `put_cred()`
+- Preserved the existing signal-triggered privilege escalation flow while aligning it with the thread-safe hidden PID APIs
+
+**eBPF / Telemetry Filtering Hardening** (`modules/bpf_hook.c`)
+- Expanded event parsing with explicit structures for procinfo records, generic eBPF event headers, and extended task contexts
+- Added obfuscation-key tracking through a dedicated one-entry ARRAY map workflow (`ebpf_obf_key`, `config_map_va`, `find_config_map_va()`)
+- Added stronger validation helpers for task pointers, PID ranges, and event layouts before suppressing data
+- Extended suppression logic across BPF map lookups/updates, iterators, ringbuffer output, perf event submission, seq output, and program execution paths
+- Added awareness of obfuscated procinfo payloads and extended event headers so hidden tasks remain filtered even when userland sensors transform PID metadata
+- Tightened current-task and ancestry checks with broader use of `READ_ONCE()` and consistent child-of-hidden-process filtering
+
+### Impact
+
+- **Anti-Forensics Coverage**: The module now protects both symbol visibility and physical memory exposure, raising the cost of live inspection and memory acquisition
+- **Initialization Resilience**: Sensitive hooks are snapshotted and shielded before the rest of the module stack comes online
+- **Telemetry Evasion**: eBPF-based monitors get less reliable PID, task, ringbuffer, perf, and map data for hidden processes
+- **Internal Consistency**: Hidden PID accounting and credential handling now rely on the newer shared helper paths instead of open-coded state access
+
 ## [Released] - 2026-02-26
 
 ### Added

