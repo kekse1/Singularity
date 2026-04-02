@@ -81,7 +81,6 @@ cd /dev/shm
 git clone https://github.com/MatheuZSecurity/Singularity
 cd Singularity
 sudo bash setup.sh
-sudo bash scripts/x.sh
 cd ..
 ```
 
