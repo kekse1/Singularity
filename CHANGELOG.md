@@ -1,5 +1,28 @@
 # Changelog
 
+## [Released] - 2026-04-06
+
+### Changed
+
+**BTF Tracepoint / Telemetry Filtering Refinements** (`modules/bpf_hook.c`)
+- Hardened ring buffer suppression so events emitted from hidden tasks are discarded using both `current->pid` and `current->tgid`, closing a remaining visibility gap for tracepoint-driven telemetry
+- Extended procinfo, BPF map, and seq-output suppression to treat tracked child PIDs the same as directly hidden PIDs, improving consistency across process-group based observations
+- Broadened numeric PID suppression checks to the full internal `PID_MAX_VALUE` range used by the module
+- Expanded start-time based filtering so descendant processes tracked through the hidden child path are also suppressed when telemetry correlates on group leader `start_time`
+
+**Hidden Child Metadata Tracking** (`modules/hidden_pids.c` / `include/hidden_pids.h`)
+- Added `child_start_times[]` to retain group leader start times for tracked child processes
+- Updated `add_child_pid()` to resolve and refresh child group leader `start_time` metadata when descendants are tracked
+
+**Forked Descendant Coverage** (`modules/trace.c`)
+- Existing `sched_process_fork` tracking now feeds both child PID membership and descendant start-time suppression so forked hidden tasks remain aligned across PID-based and start-time-based filtering paths
+
+### Impact
+
+- **Tracepoint Evasion**: Ring buffer based BTF tracepoint consumers receive less usable telemetry for hidden process trees
+- **Process Tree Consistency**: Forked descendants tracked through `trace.c` now stay aligned across PID-based and start-time-based suppression logic
+- **Telemetry Resilience**: Hidden child tasks are less likely to leak through process correlation that relies on `tgid` plus stable process birth timestamps
+
 ## [Released] - 2026-03-18
 
 ### Added
